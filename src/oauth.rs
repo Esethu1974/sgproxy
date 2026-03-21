@@ -1120,9 +1120,7 @@ fn stringify_codex_error(error: &Value) -> String {
             [
                 error_type,
                 message,
-                (!code.is_empty())
-                    .then(|| format!("code={code}"))
-                    .unwrap_or_default(),
+                if !code.is_empty() { format!("code={code}") } else { Default::default() },
             ]
             .into_iter()
             .filter(|item| !item.is_empty())
