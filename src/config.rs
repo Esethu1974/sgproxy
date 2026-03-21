@@ -1,100 +1,35 @@
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_CONFIG_PATH: &str = "./sgproxy.toml";
+pub const STORAGE_KEY: &str = "state";
 pub const DEFAULT_REQUIRED_BETA: &str = "oauth-2025-04-20";
 pub const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_CLAUDE_AI_BASE_URL: &str = "https://claude.ai";
 pub const DEFAULT_REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
 pub const DEFAULT_USER_AGENT: &str = "claude-code/2.1.76";
+pub const DEFAULT_TOKEN_USER_AGENT: &str = "claude-cli/2.1.76 (external, cli)";
 pub const CLAUDE_CODE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 pub const CLAUDE_CODE_OAUTH_SCOPE: &str = "user:profile user:inference user:sessions:claude_code";
-pub const OAUTH_STATE_TTL_MS: u64 = 600_000;
+pub const OAUTH_STATE_TTL_MS: u64 = 10 * 60 * 1000;
+pub const FIVE_HOUR_WINDOW_MS: u64 = 5 * 60 * 60 * 1000;
+pub const SEVEN_DAY_WINDOW_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
-pub struct ConfigFile {
-    #[serde(default)]
-    pub server: ServerConfig,
-    #[serde(default)]
-    pub upstream: UpstreamConfig,
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DurableStateDoc {
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     #[serde(default)]
     pub credentials: Vec<CredentialConfig>,
-}
-
-
-impl ConfigFile {
-    pub fn normalize(&mut self) {
-        self.upstream.proxy = clean_opt_owned(self.upstream.proxy.take());
-        self.credentials.sort_by_key(|item| item.order);
-        for credential in &mut self.credentials {
-            credential.access_token = credential.access_token.trim().to_string();
-            credential.refresh_token = credential.refresh_token.trim().to_string();
-            credential.user_email = clean_opt_owned(credential.user_email.take());
-            credential.organization_uuid = clean_opt_owned(credential.organization_uuid.take());
-            credential.subscription_type = clean_opt_owned(credential.subscription_type.take());
-            credential.rate_limit_tier = clean_opt_owned(credential.rate_limit_tier.take());
-            credential.last_error = clean_opt_owned(credential.last_error.take());
-        }
-        if self.upstream.required_beta.is_empty() {
-            self.upstream.required_beta = vec![DEFAULT_REQUIRED_BETA.to_string()];
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerConfig {
-    #[serde(default = "default_host")]
-    pub host: String,
-    #[serde(default = "default_port")]
-    pub port: u16,
     #[serde(default)]
-    pub admin_token: String,
-    #[serde(default = "default_max_body_bytes")]
-    pub max_body_bytes: usize,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            host: default_host(),
-            port: default_port(),
-            admin_token: String::new(),
-            max_body_bytes: default_max_body_bytes(),
-        }
-    }
+    pub oauth_states: Vec<StoredOAuthState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamConfig {
-    #[serde(default = "default_base_url")]
-    pub base_url: String,
-    #[serde(default = "default_claude_ai_base_url")]
-    pub claude_ai_base_url: String,
-    #[serde(default, alias = "http_proxy", alias = "socks_proxy")]
-    pub proxy: Option<String>,
-    #[serde(default = "default_anthropic_version")]
-    pub anthropic_version: String,
-    #[serde(default = "default_required_beta")]
-    pub required_beta: Vec<String>,
-    #[serde(default = "default_user_agent")]
-    pub default_user_agent: String,
-    #[serde(default = "default_rate_limit_cooldown_secs")]
-    pub rate_limit_cooldown_secs: u64,
-}
-
-impl Default for UpstreamConfig {
-    fn default() -> Self {
-        Self {
-            base_url: default_base_url(),
-            claude_ai_base_url: default_claude_ai_base_url(),
-            proxy: None,
-            anthropic_version: default_anthropic_version(),
-            required_beta: default_required_beta(),
-            default_user_agent: default_user_agent(),
-            rate_limit_cooldown_secs: default_rate_limit_cooldown_secs(),
-        }
-    }
+pub struct StoredOAuthState {
+    pub state_id: String,
+    pub code_verifier: String,
+    pub redirect_uri: String,
+    pub created_at_unix_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,9 +69,8 @@ pub enum CredentialStatus {
     #[default]
     Healthy,
     Cooldown5h,
-    CooldownSonnet7d,
-    #[serde(alias = "cooldown_all_7d")]
     Cooldown7d,
+    CooldownSonnet7d,
     Dead,
 }
 
@@ -160,7 +94,7 @@ pub struct CredentialUsageBucket {
     pub resets_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageCredentialView {
     pub id: String,
     pub user_email: Option<String>,
@@ -173,77 +107,97 @@ pub struct UsageCredentialView {
     pub usage: CredentialUsageSnapshot,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct AdminConfigView {
-    pub host: String,
-    pub port: u16,
-    pub proxy: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct UpdateConfigInput {
-    pub host: String,
-    pub port: u16,
-    pub proxy: Option<String>,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct CredentialUpsertInput {
+    #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
     pub enabled: Option<bool>,
+    #[serde(default)]
     pub order: Option<u32>,
+    #[serde(default)]
     pub access_token: Option<String>,
+    #[serde(default)]
     pub refresh_token: Option<String>,
+    #[serde(default)]
     pub expires_at_unix_ms: Option<u64>,
+    #[serde(default)]
+    pub user_email: Option<String>,
+    #[serde(default)]
+    pub organization_uuid: Option<String>,
+    #[serde(default)]
+    pub subscription_type: Option<String>,
+    #[serde(default)]
+    pub rate_limit_tier: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CredentialJsonView {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at_unix_ms: u64,
     pub user_email: Option<String>,
     pub organization_uuid: Option<String>,
     pub subscription_type: Option<String>,
     pub rate_limit_tier: Option<String>,
+    pub status: CredentialStatus,
 }
 
-pub fn default_host() -> String {
-    "127.0.0.1".to_string()
+pub fn default_schema_version() -> u32 {
+    1
 }
 
-pub const fn default_port() -> u16 {
-    8787
-}
-
-pub const fn default_max_body_bytes() -> usize {
-    50 * 1024 * 1024
-}
-
-pub fn default_base_url() -> String {
-    DEFAULT_BASE_URL.to_string()
-}
-
-pub fn default_claude_ai_base_url() -> String {
-    DEFAULT_CLAUDE_AI_BASE_URL.to_string()
-}
-
-pub fn default_anthropic_version() -> String {
-    DEFAULT_ANTHROPIC_VERSION.to_string()
-}
-
-pub fn default_required_beta() -> Vec<String> {
-    vec![DEFAULT_REQUIRED_BETA.to_string()]
-}
-
-pub fn default_user_agent() -> String {
-    DEFAULT_USER_AGENT.to_string()
-}
-
-pub const fn default_rate_limit_cooldown_secs() -> u64 {
-    300
-}
-
-pub const fn default_enabled() -> bool {
+pub fn default_enabled() -> bool {
     true
 }
 
 pub fn clean_opt_owned(value: Option<String>) -> Option<String> {
-    value.and_then(|item| {
-        let trimmed = item.trim();
+    value.and_then(|value| {
+        let trimmed = value.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_string())
     })
+}
+
+impl DurableStateDoc {
+    pub fn normalize(&mut self, now: u64) {
+        self.credentials.sort_by_key(|item| item.order);
+        for credential in &mut self.credentials {
+            credential.access_token = credential.access_token.trim().to_string();
+            credential.refresh_token = credential.refresh_token.trim().to_string();
+            credential.user_email = clean_opt_owned(credential.user_email.take());
+            credential.organization_uuid = clean_opt_owned(credential.organization_uuid.take());
+            credential.subscription_type = clean_opt_owned(credential.subscription_type.take());
+            credential.rate_limit_tier = clean_opt_owned(credential.rate_limit_tier.take());
+            credential.last_error = clean_opt_owned(credential.last_error.take());
+            if matches!(
+                credential.status,
+                CredentialStatus::Cooldown5h
+                    | CredentialStatus::Cooldown7d
+                    | CredentialStatus::CooldownSonnet7d
+            ) && credential
+                .cooldown_until_unix_ms
+                .is_some_and(|until| until <= now)
+            {
+                credential.status = CredentialStatus::Healthy;
+                credential.cooldown_until_unix_ms = None;
+            }
+        }
+        self.oauth_states
+            .retain(|item| now.saturating_sub(item.created_at_unix_ms) <= OAUTH_STATE_TTL_MS);
+    }
+}
+
+impl CredentialConfig {
+    pub fn json_view(&self) -> CredentialJsonView {
+        CredentialJsonView {
+            access_token: self.access_token.clone(),
+            refresh_token: self.refresh_token.clone(),
+            expires_at_unix_ms: self.expires_at_unix_ms,
+            user_email: self.user_email.clone(),
+            organization_uuid: self.organization_uuid.clone(),
+            subscription_type: self.subscription_type.clone(),
+            rate_limit_tier: self.rate_limit_tier.clone(),
+            status: self.status,
+        }
+    }
 }

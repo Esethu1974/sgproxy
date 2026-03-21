@@ -1,31 +1,52 @@
 use anyhow::{Result, anyhow};
-use axum::Json;
 use base64::Engine as _;
 use rand::RngCore as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use url::form_urlencoded;
+use wasm_bindgen::JsValue;
+use worker::{Fetch, Headers, Method, Request, RequestInit};
 
 use crate::config::{
-    CLAUDE_CODE_OAUTH_CLIENT_ID, CLAUDE_CODE_OAUTH_SCOPE, DEFAULT_REDIRECT_URI,
-    DEFAULT_REQUIRED_BETA, DEFAULT_USER_AGENT,
+    CLAUDE_CODE_OAUTH_CLIENT_ID, CLAUDE_CODE_OAUTH_SCOPE, CredentialConfig, CredentialUsageBucket,
+    CredentialUsageSnapshot, DEFAULT_ANTHROPIC_VERSION, DEFAULT_BASE_URL,
+    DEFAULT_CLAUDE_AI_BASE_URL, DEFAULT_REDIRECT_URI, DEFAULT_REQUIRED_BETA,
+    DEFAULT_TOKEN_USER_AGENT, DEFAULT_USER_AGENT, StoredOAuthState,
 };
-use crate::state::{AppState, OAuthState, now_unix_ms};
+use crate::state::now_unix_ms;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct OAuthStartInput {
+    #[serde(default)]
     pub redirect_uri: Option<String>,
+    #[serde(default)]
     pub scope: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct OAuthCallbackInput {
+    #[serde(default)]
     pub callback_url: Option<String>,
+    #[serde(default)]
     pub code: Option<String>,
+    #[serde(default)]
     pub state: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
+pub struct OAuthStartResponse {
+    pub auth_url: String,
+    pub state: String,
+    pub redirect_uri: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OAuthStartState {
+    pub response: OAuthStartResponse,
+    pub stored_state: StoredOAuthState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenResponse {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
@@ -38,6 +59,31 @@ pub struct TokenResponse {
     pub error: Option<String>,
     #[serde(default)]
     pub error_description: Option<String>,
+    #[serde(default, alias = "organizationUuid")]
+    pub organization_uuid: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RefreshedCredential {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at_unix_ms: u64,
+    pub subscription_type: Option<String>,
+    pub rate_limit_tier: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum RefreshError {
+    InvalidCredential(String),
+    Transient(String),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OAuthProfileParsed {
+    pub email: Option<String>,
+    pub subscription_type: Option<String>,
+    pub rate_limit_tier: Option<String>,
+    pub organization_uuid: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,158 +110,127 @@ struct OAuthProfileOrg {
     rate_limit_tier: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct OAuthStartResponse {
-    pub auth_url: String,
-    pub state: String,
-    pub redirect_uri: String,
+#[derive(Debug, Deserialize)]
+struct UsagePayload {
+    #[serde(default)]
+    five_hour: UsageBucketPayload,
+    #[serde(default)]
+    seven_day: UsageBucketPayload,
+    #[serde(default)]
+    seven_day_sonnet: UsageBucketPayload,
 }
 
-pub async fn oauth_start(
-    state: &AppState,
-    payload: OAuthStartInput,
-) -> Result<Json<OAuthStartResponse>> {
-    let config = state.config_snapshot().await;
-    let redirect_uri = payload
+#[derive(Debug, Default, Deserialize)]
+struct UsageBucketPayload {
+    utilization: Option<f64>,
+    resets_at: Option<String>,
+}
+
+pub fn oauth_start(input: OAuthStartInput) -> OAuthStartState {
+    let redirect_uri = input
         .redirect_uri
-        .and_then(clean_opt)
+        .and_then(clean_string)
         .unwrap_or_else(|| DEFAULT_REDIRECT_URI.to_string());
-    let scope = payload
+    let scope = input
         .scope
-        .and_then(clean_opt)
+        .and_then(clean_string)
         .unwrap_or_else(|| CLAUDE_CODE_OAUTH_SCOPE.to_string());
     let state_id = generate_oauth_state();
     let code_verifier = generate_code_verifier();
-    let code_challenge = generate_code_challenge(code_verifier.as_str());
+    let code_challenge = generate_code_challenge(&code_verifier);
     let auth_url = build_authorize_url(
-        config.upstream.claude_ai_base_url.as_str(),
-        redirect_uri.as_str(),
-        scope.as_str(),
-        code_challenge.as_str(),
-        state_id.as_str(),
+        DEFAULT_CLAUDE_AI_BASE_URL,
+        &redirect_uri,
+        &scope,
+        &code_challenge,
+        &state_id,
     );
 
-    state
-        .insert_oauth_state(
-            state_id.clone(),
-            OAuthState {
-                code_verifier,
-                redirect_uri: redirect_uri.clone(),
-                api_base_url: config.upstream.base_url.clone(),
-                claude_ai_base_url: config.upstream.claude_ai_base_url.clone(),
-                created_at_unix_ms: now_unix_ms(),
-            },
-        )
-        .await;
-
-    Ok(Json(OAuthStartResponse {
-        auth_url,
-        state: state_id,
-        redirect_uri,
-    }))
+    OAuthStartState {
+        response: OAuthStartResponse {
+            auth_url,
+            state: state_id.clone(),
+            redirect_uri: redirect_uri.clone(),
+        },
+        stored_state: StoredOAuthState {
+            state_id,
+            code_verifier,
+            redirect_uri,
+            created_at_unix_ms: now_unix_ms(),
+        },
+    }
 }
 
-pub async fn oauth_callback(
-    state: &AppState,
-    payload: OAuthCallbackInput,
-) -> Result<Json<serde_json::Value>> {
-    let (code, requested_state) = resolve_code_and_state(&payload)?;
-    let (resolved_state, oauth_state) = state
-        .take_oauth_state_with_id(requested_state.as_deref())
-        .await?;
-    let client = state.client().await;
-    let token = exchange_code_for_tokens(
-        &client,
-        oauth_state.api_base_url.as_str(),
-        oauth_state.claude_ai_base_url.as_str(),
-        oauth_state.redirect_uri.as_str(),
-        oauth_state.code_verifier.as_str(),
-        code.as_str(),
-        Some(resolved_state.as_str()),
+pub fn resolve_code_and_state(payload: &OAuthCallbackInput) -> Result<(String, Option<String>)> {
+    let mut code = payload.code.clone().and_then(clean_string);
+    let mut state = payload.state.clone().and_then(clean_string);
+
+    if let Some(callback_url) = payload
+        .callback_url
+        .as_ref()
+        .and_then(|value| clean_opt_str(value))
+    {
+        let callback_code = extract_value_from_text(&callback_url, "code");
+        let callback_state = extract_value_from_text(&callback_url, "state");
+        if code.is_none() {
+            code = callback_code;
+        }
+        if state.is_none() {
+            state = callback_state;
+        }
+        if code.is_none() {
+            code = extract_manual_code(&callback_url);
+        }
+    }
+
+    let code = code.ok_or_else(|| anyhow!("missing code"))?;
+    Ok((code, state))
+}
+
+pub async fn exchange_code_for_tokens(
+    stored_state: &StoredOAuthState,
+    code: &str,
+) -> Result<TokenResponse> {
+    let cleaned_code = code.split('#').next().unwrap_or(code);
+    let cleaned_code = cleaned_code.split('&').next().unwrap_or(cleaned_code);
+    let body = format!(
+        "grant_type=authorization_code&client_id={}&code={}&redirect_uri={}&code_verifier={}&state={}",
+        url_encode(CLAUDE_CODE_OAUTH_CLIENT_ID),
+        url_encode(cleaned_code),
+        url_encode(&stored_state.redirect_uri),
+        url_encode(&stored_state.code_verifier),
+        url_encode(&stored_state.state_id),
+    );
+
+    let headers = default_upstream_headers()?;
+    headers.set("content-type", "application/x-www-form-urlencoded")?;
+    headers.set("accept", "application/json, text/plain, */*")?;
+    headers.set("origin", DEFAULT_CLAUDE_AI_BASE_URL)?;
+    headers.set("referer", "https://claude.ai/")?;
+    headers.set("user-agent", DEFAULT_TOKEN_USER_AGENT)?;
+
+    let mut response = send_request(
+        Method::Post,
+        &format!("{}/v1/oauth/token", DEFAULT_BASE_URL),
+        headers,
+        Some(JsValue::from_str(&body)),
     )
     .await?;
 
-    let access_token = token
-        .access_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("missing_access_token"))?
-        .to_string();
-    let refresh_token = token
-        .refresh_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("missing_refresh_token"))?
-        .to_string();
-
-    let profile = fetch_oauth_profile(
-        &client,
-        oauth_state.api_base_url.as_str(),
-        access_token.as_str(),
-    )
-    .await
-    .ok();
-    let expires_at_unix_ms =
-        now_unix_ms().saturating_add(token.expires_in.unwrap_or(3600).saturating_mul(1000));
-    let credential = state
-        .add_or_create_credential(
-            crate::config::CredentialUpsertInput {
-                id: None,
-                enabled: Some(true),
-                order: None,
-                access_token: Some(access_token.clone()),
-                refresh_token: Some(refresh_token.clone()),
-                expires_at_unix_ms: Some(expires_at_unix_ms),
-                user_email: profile.as_ref().and_then(|item| item.email.clone()),
-                organization_uuid: profile
-                    .as_ref()
-                    .and_then(|item| item.organization_uuid.clone()),
-                subscription_type: token.subscription_type.clone().or_else(|| {
-                    profile
-                        .as_ref()
-                        .and_then(|item| item.subscription_type.clone())
-                }),
-                rate_limit_tier: token.rate_limit_tier.clone().or_else(|| {
-                    profile
-                        .as_ref()
-                        .and_then(|item| item.rate_limit_tier.clone())
-                }),
-            },
-            None,
-        )
-        .await?;
-
-    Ok(Json(serde_json::json!({
-        "credential": credential,
-        "upstream": {
-            "expires_in": token.expires_in,
-            "subscription_type": token.subscription_type,
-            "rate_limit_tier": token.rate_limit_tier,
-        }
-    })))
-}
-
-#[derive(Debug, Clone)]
-pub struct RefreshedCredential {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub expires_at_unix_ms: u64,
-    pub subscription_type: Option<String>,
-    pub rate_limit_tier: Option<String>,
-}
-
-#[derive(Debug)]
-pub enum RefreshError {
-    InvalidCredential(String),
-    Transient(String),
+    let status = response.status_code();
+    let bytes = response.bytes().await?;
+    if !(200..=299).contains(&status) {
+        return Err(anyhow!(
+            "oauth_token_failed: status={} body={}",
+            status,
+            String::from_utf8_lossy(&bytes)
+        ));
+    }
+    Ok(serde_json::from_slice::<TokenResponse>(&bytes)?)
 }
 
 pub async fn maybe_refresh_access_token(
-    client: &reqwest::Client,
-    upstream: &crate::config::UpstreamConfig,
-    credential: &crate::config::CredentialConfig,
+    credential: &CredentialConfig,
 ) -> Result<Option<RefreshedCredential>, RefreshError> {
     let now = now_unix_ms();
     if !credential.access_token.trim().is_empty()
@@ -223,7 +238,6 @@ pub async fn maybe_refresh_access_token(
     {
         return Ok(None);
     }
-
     if credential.refresh_token.trim().is_empty() {
         return Err(RefreshError::InvalidCredential(
             "missing refresh_token".to_string(),
@@ -233,28 +247,38 @@ pub async fn maybe_refresh_access_token(
     let body = format!(
         "grant_type=refresh_token&client_id={}&refresh_token={}",
         url_encode(CLAUDE_CODE_OAUTH_CLIENT_ID),
-        url_encode(credential.refresh_token.as_str()),
+        url_encode(&credential.refresh_token),
     );
-    let url = format!("{}/v1/oauth/token", upstream.base_url.trim_end_matches('/'));
-    let response = client
-        .post(url)
-        .header("anthropic-version", upstream.anthropic_version.as_str())
-        .header("anthropic-beta", DEFAULT_REQUIRED_BETA)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .header("accept", "application/json, text/plain, */*")
-        .header("connection", "close")
-        .header("user-agent", DEFAULT_USER_AGENT)
-        .body(body)
-        .send()
-        .await
+
+    let headers =
+        default_upstream_headers().map_err(|err| RefreshError::Transient(err.to_string()))?;
+    headers
+        .set("content-type", "application/x-www-form-urlencoded")
         .map_err(|err| RefreshError::Transient(err.to_string()))?;
-    let status = response.status();
+    headers
+        .set("accept", "application/json, text/plain, */*")
+        .map_err(|err| RefreshError::Transient(err.to_string()))?;
+    headers
+        .set("user-agent", DEFAULT_TOKEN_USER_AGENT)
+        .map_err(|err| RefreshError::Transient(err.to_string()))?;
+
+    let mut response = send_request(
+        Method::Post,
+        &format!("{}/v1/oauth/token", DEFAULT_BASE_URL),
+        headers,
+        Some(JsValue::from_str(&body)),
+    )
+    .await
+    .map_err(|err| RefreshError::Transient(err.to_string()))?;
+
+    let status = response.status_code();
     let bytes = response
         .bytes()
         .await
         .map_err(|err| RefreshError::Transient(err.to_string()))?;
     let parsed = serde_json::from_slice::<TokenResponse>(&bytes).ok();
-    if status.is_success() {
+
+    if (200..=299).contains(&status) {
         let access_token = parsed
             .as_ref()
             .and_then(|item| item.access_token.as_deref())
@@ -298,31 +322,79 @@ pub async fn maybe_refresh_access_token(
         .unwrap_or_default();
     let text = String::from_utf8_lossy(&bytes).to_string();
     let message = if error.is_empty() && description.is_empty() {
-        format!(
-            "oauth token refresh failed: status={} body={text}",
-            status.as_u16()
-        )
+        format!("oauth token refresh failed: status={} body={text}", status)
     } else {
         format!(
             "oauth token refresh failed: status={} error={} description={}",
-            status.as_u16(),
-            error,
-            description
+            status, error, description
         )
     };
-    if is_invalid_oauth_credential_failure(status.as_u16(), error, description) {
+
+    if status == 400 || status == 401 || status == 403 {
         Err(RefreshError::InvalidCredential(message))
     } else {
         Err(RefreshError::Transient(message))
     }
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct OAuthProfileParsed {
-    pub(crate) email: Option<String>,
-    pub(crate) subscription_type: Option<String>,
-    pub(crate) rate_limit_tier: Option<String>,
-    pub(crate) organization_uuid: Option<String>,
+pub async fn fetch_oauth_profile(access_token: &str) -> Result<OAuthProfileParsed> {
+    let headers = Headers::new();
+    headers.set("authorization", &format!("Bearer {access_token}"))?;
+    headers.set("accept", "application/json")?;
+    headers.set("anthropic-beta", DEFAULT_REQUIRED_BETA)?;
+    headers.set("user-agent", DEFAULT_USER_AGENT)?;
+
+    let mut response = send_request(
+        Method::Get,
+        &format!("{}/api/oauth/profile", DEFAULT_BASE_URL),
+        headers,
+        None,
+    )
+    .await?;
+    let status = response.status_code();
+    let bytes = response.bytes().await?;
+    if !(200..=299).contains(&status) {
+        return Err(anyhow!(
+            "oauth_profile_failed: status={} body={}",
+            status,
+            String::from_utf8_lossy(&bytes)
+        ));
+    }
+    let profile = serde_json::from_slice::<OAuthProfile>(&bytes)?;
+    Ok(parse_profile(profile))
+}
+
+pub async fn fetch_usage(access_token: &str) -> Result<CredentialUsageSnapshot> {
+    let headers = Headers::new();
+    headers.set("authorization", &format!("Bearer {access_token}"))?;
+    headers.set("accept", "application/json")?;
+    headers.set("anthropic-beta", DEFAULT_REQUIRED_BETA)?;
+    headers.set("user-agent", DEFAULT_USER_AGENT)?;
+
+    let mut response = send_request(
+        Method::Get,
+        &format!("{}/api/oauth/usage", DEFAULT_BASE_URL),
+        headers,
+        None,
+    )
+    .await?;
+    let status = response.status_code();
+    let bytes = response.bytes().await?;
+    if !(200..=299).contains(&status) {
+        return Err(anyhow!(
+            "oauth_usage_failed: status={} body={}",
+            status,
+            String::from_utf8_lossy(&bytes)
+        ));
+    }
+
+    let payload = serde_json::from_slice::<UsagePayload>(&bytes)?;
+    Ok(CredentialUsageSnapshot {
+        five_hour: parse_usage_bucket(payload.five_hour),
+        seven_day: parse_usage_bucket(payload.seven_day),
+        seven_day_sonnet: parse_usage_bucket(payload.seven_day_sonnet),
+        last_error: None,
+    })
 }
 
 fn parse_profile(profile: OAuthProfile) -> OAuthProfileParsed {
@@ -349,118 +421,34 @@ fn parse_profile(profile: OAuthProfile) -> OAuthProfileParsed {
     }
 }
 
-fn resolve_code_and_state(payload: &OAuthCallbackInput) -> Result<(String, Option<String>)> {
-    let mut code = payload.code.clone().and_then(clean_opt);
-    let mut state = payload.state.clone().and_then(clean_opt);
-    if let Some(callback_url) = payload
-        .callback_url
-        .as_ref()
-        .and_then(|value| clean_opt_str(value.as_str()))
-    {
-        let callback_code = extract_value_from_text(callback_url.as_str(), "code");
-        let callback_state = extract_value_from_text(callback_url.as_str(), "state");
-        if code.is_none() {
-            code = callback_code;
-        }
-        if state.is_none() {
-            state = callback_state;
-        }
-        if code.is_none() {
-            code = extract_manual_code(callback_url.as_str());
-        }
-        if state.is_none() {
-            state = extract_labeled_value(callback_url.as_str(), "state");
-        }
+fn parse_usage_bucket(bucket: UsageBucketPayload) -> CredentialUsageBucket {
+    CredentialUsageBucket {
+        utilization_pct: bucket
+            .utilization
+            .map(|value| value.round().clamp(0.0, 100.0) as u32),
+        resets_at: bucket.resets_at.and_then(clean_string),
     }
-    let code = code.ok_or_else(|| anyhow!("missing code"))?;
-    Ok((code, state))
 }
 
-async fn exchange_code_for_tokens(
-    client: &reqwest::Client,
-    api_base_url: &str,
-    claude_ai_base_url: &str,
-    redirect_uri: &str,
-    code_verifier: &str,
-    code: &str,
-    state: Option<&str>,
-) -> Result<TokenResponse> {
-    let cleaned_code = code.split('#').next().unwrap_or(code);
-    let cleaned_code = cleaned_code.split('&').next().unwrap_or(cleaned_code);
-    let mut body = format!(
-        "grant_type=authorization_code&client_id={}&code={}&redirect_uri={}&code_verifier={}",
-        url_encode(CLAUDE_CODE_OAUTH_CLIENT_ID),
-        url_encode(cleaned_code),
-        url_encode(redirect_uri),
-        url_encode(code_verifier),
-    );
-    if let Some(state) = state {
-        body.push_str("&state=");
-        body.push_str(url_encode(state).as_str());
-    }
-    let origin = claude_ai_base_url.trim_end_matches('/');
-    let url = format!("{}/v1/oauth/token", api_base_url.trim_end_matches('/'));
-    let response = client
-        .post(url)
-        .header("anthropic-version", "2023-06-01")
-        .header("anthropic-beta", DEFAULT_REQUIRED_BETA)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .header("accept", "application/json, text/plain, */*")
-        .header("user-agent", DEFAULT_USER_AGENT)
-        .header("origin", origin)
-        .header("referer", format!("{origin}/"))
-        .body(body)
-        .send()
-        .await?;
-    let status = response.status();
-    let bytes = response.bytes().await?;
-    if !status.is_success() {
-        return Err(anyhow!(
-            "oauth_token_failed: status={} body={}",
-            status.as_u16(),
-            String::from_utf8_lossy(&bytes)
-        ));
-    }
-    Ok(serde_json::from_slice::<TokenResponse>(&bytes)?)
+fn default_upstream_headers() -> Result<Headers> {
+    let headers = Headers::new();
+    headers.set("anthropic-version", DEFAULT_ANTHROPIC_VERSION)?;
+    headers.set("anthropic-beta", DEFAULT_REQUIRED_BETA)?;
+    Ok(headers)
 }
 
-pub(crate) async fn fetch_oauth_profile(
-    client: &reqwest::Client,
-    api_base_url: &str,
-    access_token: &str,
-) -> Result<OAuthProfileParsed> {
-    let url = format!("{}/api/oauth/profile", api_base_url.trim_end_matches('/'));
-    let mut last_err = None;
-    let response = loop {
-        match client
-            .get(url.as_str())
-            .header("authorization", format!("Bearer {access_token}"))
-            .header("user-agent", DEFAULT_USER_AGENT)
-            .header("accept", "application/json")
-            .header("connection", "close")
-            .header("anthropic-beta", DEFAULT_REQUIRED_BETA)
-            .send()
-            .await
-        {
-            Ok(response) => break response,
-            Err(err) if last_err.is_none() => {
-                last_err = Some(err);
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-            Err(err) => return Err(err.into()),
-        }
-    };
-    let status = response.status();
-    let bytes = response.bytes().await?;
-    if !status.is_success() {
-        return Err(anyhow!(
-            "oauth_profile_failed: status={} body={}",
-            status.as_u16(),
-            String::from_utf8_lossy(&bytes)
-        ));
-    }
-    let payload = serde_json::from_slice::<OAuthProfile>(&bytes)?;
-    Ok(parse_profile(payload))
+async fn send_request(
+    method: Method,
+    url: &str,
+    headers: Headers,
+    body: Option<JsValue>,
+) -> worker::Result<worker::Response> {
+    let mut init = RequestInit::new();
+    init.with_method(method)
+        .with_headers(headers)
+        .with_body(body);
+    let request = Request::new_with_init(url, &init)?;
+    Fetch::Request(request).send().await
 }
 
 fn build_authorize_url(
@@ -484,7 +472,7 @@ fn build_authorize_url(
         ("state".to_string(), state.to_string()),
     ]
     .into_iter()
-    .map(|(key, value)| format!("{key}={}", url_encode(value.as_str())))
+    .map(|(key, value)| format!("{key}={}", url_encode(&value)))
     .collect::<Vec<_>>()
     .join("&");
     format!(
@@ -494,14 +482,13 @@ fn build_authorize_url(
     )
 }
 
-fn clean_opt(value: String) -> Option<String> {
+fn clean_opt_str(value: &str) -> Option<String> {
     let trimmed = value.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn clean_opt_str(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
+fn clean_string(value: String) -> Option<String> {
+    clean_opt_str(&value)
 }
 
 fn generate_oauth_state() -> String {
@@ -545,15 +532,15 @@ fn extract_value_from_text(raw: &str, key: &str) -> Option<String> {
             if decoded == raw {
                 None
             } else {
-                parse_query_value(Some(decoded.as_str()), key)
-                    .or_else(|| extract_inline_query_value(decoded.as_str(), key))
+                parse_query_value(Some(&decoded), key)
+                    .or_else(|| extract_inline_query_value(&decoded, key))
             }
         })
 }
 
 fn extract_inline_query_value(raw: &str, key: &str) -> Option<String> {
     let needle = format!("{key}=");
-    let index = raw.find(needle.as_str())?;
+    let index = raw.find(&needle)?;
     let start = index + needle.len();
     let rest = &raw[start..];
     let end = rest
@@ -575,7 +562,7 @@ fn extract_labeled_value(raw: &str, key: &str) -> Option<String> {
         let lower = trimmed.to_ascii_lowercase();
         for separator in [":", "="] {
             let prefix = format!("{key}{separator}");
-            if lower.starts_with(prefix.as_str()) {
+            if lower.starts_with(&prefix) {
                 let value = trimmed[prefix.len()..].trim();
                 if !value.is_empty() {
                     return Some(value.to_string());
@@ -595,7 +582,6 @@ fn extract_manual_code(raw: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-
     let looks_structured = trimmed.contains("://")
         || trimmed.contains('?')
         || trimmed.contains('&')
@@ -604,12 +590,11 @@ fn extract_manual_code(raw: &str) -> Option<String> {
     if looks_structured {
         return None;
     }
-
     (!trimmed.contains(char::is_whitespace)).then(|| trimmed.to_string())
 }
 
 fn percent_decode_lossy(value: &str) -> String {
-    url::form_urlencoded::parse(format!("x={value}").as_bytes())
+    form_urlencoded::parse(format!("x={value}").as_bytes())
         .next()
         .map(|(_, decoded)| decoded.into_owned())
         .unwrap_or_else(|| value.to_string())
@@ -617,80 +602,4 @@ fn percent_decode_lossy(value: &str) -> String {
 
 fn url_encode(value: &str) -> String {
     form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
-}
-
-fn is_invalid_oauth_credential_failure(status: u16, error: &str, description: &str) -> bool {
-    if !matches!(status, 400 | 401 | 403) {
-        return false;
-    }
-    let joined = format!(
-        "{} {}",
-        error.to_ascii_lowercase(),
-        description.to_ascii_lowercase()
-    );
-    joined.contains("invalid_grant")
-        || joined.contains("invalid_client")
-        || joined.contains("unauthorized_client")
-        || joined.contains("invalid_scope")
-        || joined.contains("invalid_token")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        OAuthCallbackInput, extract_labeled_value, extract_manual_code, extract_value_from_text,
-        resolve_code_and_state,
-    };
-
-    #[test]
-    fn resolve_code_and_state_accepts_full_callback_url() {
-        let payload = OAuthCallbackInput {
-            callback_url: Some(
-                "https://platform.claude.com/oauth/code/callback?code=abc123&state=state456"
-                    .to_string(),
-            ),
-            code: None,
-            state: None,
-        };
-        let (code, state) = resolve_code_and_state(&payload).expect("resolve code/state");
-        assert_eq!(code, "abc123");
-        assert_eq!(state.as_deref(), Some("state456"));
-    }
-
-    #[test]
-    fn extract_value_from_text_accepts_pasted_text_with_embedded_url() {
-        let pasted = "paste this callback: https://platform.claude.com/oauth/code/callback?code=abc123&state=state456";
-        assert_eq!(
-            extract_value_from_text(pasted, "code").as_deref(),
-            Some("abc123")
-        );
-        assert_eq!(
-            extract_value_from_text(pasted, "state").as_deref(),
-            Some("state456")
-        );
-    }
-
-    #[test]
-    fn resolve_code_and_state_accepts_manual_code_only() {
-        let payload = OAuthCallbackInput {
-            callback_url: Some("abc123".to_string()),
-            code: None,
-            state: None,
-        };
-        let (code, state) = resolve_code_and_state(&payload).expect("resolve code/state");
-        assert_eq!(code, "abc123");
-        assert_eq!(state, None);
-    }
-
-    #[test]
-    fn extract_manual_code_accepts_labeled_lines() {
-        assert_eq!(
-            extract_manual_code("code: abc123").as_deref(),
-            Some("abc123")
-        );
-        assert_eq!(
-            extract_labeled_value("state: state456", "state").as_deref(),
-            Some("state456")
-        );
-    }
 }

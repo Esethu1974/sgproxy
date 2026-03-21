@@ -6,130 +6,144 @@
     <title>sgproxy</title>
     <style>
       :root {
-        --bg: #f3efe7;
-        --panel: rgba(255, 255, 255, 0.78);
-        --ink: #1b1d20;
-        --muted: #586068;
+        --bg: #f6f3ec;
+        --panel: rgba(255, 255, 255, 0.85);
+        --panel-solid: #ffffff;
+        --ink: #171717;
+        --muted: #626262;
+        --line: rgba(0, 0, 0, 0.1);
         --accent: #0f766e;
-        --accent-strong: #115e59;
+        --accent-soft: rgba(15, 118, 110, 0.12);
         --danger: #b91c1c;
-        --line: rgba(27, 29, 32, 0.12);
-        --shadow: 0 18px 40px rgba(35, 34, 31, 0.1);
+        --warn: #b45309;
+        --shadow: 0 16px 48px rgba(0, 0, 0, 0.08);
+        --radius: 18px;
+        --radius-sm: 12px;
       }
 
-      * {
-        box-sizing: border-box;
-      }
-
-      html,
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; margin: 0; }
       body {
-        min-height: 100vh;
-      }
-
-      body {
-        margin: 0;
-        font-family: "IBM Plex Sans", "SF Pro Text", "Segoe UI", sans-serif;
+        font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 34%),
-          radial-gradient(circle at bottom right, rgba(180, 83, 9, 0.16), transparent 32%),
-          linear-gradient(180deg, #f8f4ec 0%, var(--bg) 100%);
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 28%),
+          radial-gradient(circle at bottom right, rgba(180, 83, 9, 0.12), transparent 30%),
+          var(--bg);
+      }
+
+      .page {
+        min-height: 100vh;
+        width: 100%;
+        padding: 28px 18px 56px;
       }
 
       .shell {
-        max-width: 1180px;
+        max-width: 980px;
         margin: 0 auto;
-        padding: 24px 18px 40px;
       }
 
       .hero {
-        padding: 18px 4px 24px;
-      }
-
-      .hero-top {
         display: flex;
-        align-items: center;
         justify-content: space-between;
-        gap: 12px;
-        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 20px;
       }
 
       h1 {
-        margin: 10px 0 8px;
-        font-size: clamp(34px, 6vw, 64px);
-        line-height: 0.95;
+        margin: 0;
+        font-size: 32px;
+        letter-spacing: -0.04em;
       }
 
-      .byline {
+      .subtitle {
+        margin-top: 8px;
         color: var(--muted);
         font-size: 13px;
-        line-height: 1.5;
+      }
+
+      .lang {
+        display: flex;
+        gap: 6px;
+      }
+
+      .lang button,
+      .tab,
+      button {
+        border: 0;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font: inherit;
+      }
+
+      .lang button {
+        padding: 8px 12px;
+        background: rgba(255, 255, 255, 0.55);
+      }
+
+      .lang button.active {
+        background: var(--ink);
+        color: white;
       }
 
       .card {
         background: var(--panel);
-        backdrop-filter: blur(14px);
+        backdrop-filter: blur(18px);
         border: 1px solid var(--line);
-        border-radius: 24px;
+        border-radius: var(--radius);
         box-shadow: var(--shadow);
-        padding: 18px;
+        padding: 22px;
       }
 
-      .card h2 {
-        margin: 0 0 14px;
-        font-size: 18px;
+      .stack { display: grid; gap: 16px; }
+      .hidden { display: none !important; }
+
+      .tabs {
+        display: inline-flex;
+        gap: 4px;
+        padding: 4px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.65);
+        margin-bottom: 18px;
       }
 
-      .stack {
-        display: grid;
-        gap: 12px;
-      }
-
-      label {
-        display: grid;
-        gap: 6px;
-        font-size: 13px;
+      .tab {
+        background: transparent;
         color: var(--muted);
+        padding: 9px 16px;
       }
 
-      input,
-      textarea,
-      button {
+      .tab.active {
+        background: var(--panel-solid);
+        color: var(--ink);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+
+      input, textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 14px;
+        background: var(--panel-solid);
         font: inherit;
       }
 
-      input,
       textarea {
-        width: 100%;
-        padding: 10px 12px;
-        border-radius: 14px;
-        border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.84);
-        color: var(--ink);
-      }
-
-      textarea {
-        min-height: 96px;
+        min-height: 120px;
         resize: vertical;
-      }
-
-      .row {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
+        font-family: "SF Mono", "Cascadia Code", monospace;
+        font-size: 13px;
       }
 
       button {
-        border: 0;
-        border-radius: 999px;
-        padding: 10px 16px;
+        padding: 10px 14px;
         background: var(--accent);
         color: white;
-        cursor: pointer;
       }
 
       button.secondary {
-        background: rgba(17, 24, 39, 0.08);
+        background: rgba(0, 0, 0, 0.06);
         color: var(--ink);
       }
 
@@ -137,887 +151,628 @@
         background: var(--danger);
       }
 
-      .hidden {
-        display: none !important;
-      }
-
-      .toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 18px;
-      }
-
-      .toolbar-title {
-        font-size: 14px;
-        color: var(--muted);
-      }
-
-      .tabs {
+      .toolbar,
+      .row {
         display: flex;
         gap: 10px;
         flex-wrap: wrap;
-        margin-bottom: 18px;
-      }
-
-      .tab {
-        background: rgba(17, 24, 39, 0.08);
-        color: var(--ink);
-      }
-
-      .tab.active {
-        background: var(--accent);
-        color: white;
-      }
-
-      .lang-switch {
-        display: flex;
-        gap: 8px;
-      }
-
-      .lang-switch button.active {
-        background: var(--accent);
-        color: white;
-      }
-
-      .mono {
-        font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+        align-items: center;
       }
 
       .status {
-        padding: 10px 12px;
-        border-radius: 14px;
-        background: rgba(15, 118, 110, 0.08);
-        color: var(--accent-strong);
-        font-size: 13px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        white-space: pre-wrap;
       }
 
-      .error {
-        background: rgba(185, 28, 28, 0.08);
+      .status.error {
+        background: rgba(185, 28, 28, 0.1);
         color: var(--danger);
       }
 
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-
-      th,
-      td {
-        text-align: left;
-        font-size: 13px;
-        padding: 10px 8px;
-        border-bottom: 1px solid var(--line);
-        vertical-align: top;
-      }
-
-      .pill {
-        display: inline-block;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: rgba(17, 24, 39, 0.08);
-        font-size: 12px;
-      }
-
-      .usage-stack {
+      .grid {
         display: grid;
-        gap: 10px;
-        min-width: 240px;
+        gap: 14px;
       }
 
-      .usage-row {
+      .credential {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.6);
+        padding: 16px;
         display: grid;
-        gap: 4px;
+        gap: 14px;
       }
 
-      .usage-meta {
+      .credential-head {
         display: flex;
         justify-content: space-between;
         gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .credential-title {
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .meta {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .pill {
+        border-radius: 999px;
+        padding: 4px 10px;
         font-size: 12px;
+        background: rgba(0, 0, 0, 0.06);
         color: var(--muted);
       }
 
-      .usage-bar {
-        position: relative;
-        height: 10px;
-        border-radius: 999px;
-        overflow: hidden;
-        background: rgba(17, 24, 39, 0.08);
+      .pill.healthy { background: rgba(15, 118, 110, 0.12); color: var(--accent); }
+      .pill.warn { background: rgba(180, 83, 9, 0.12); color: var(--warn); }
+      .pill.dead { background: rgba(185, 28, 28, 0.12); color: var(--danger); }
+
+      details {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.45);
+        padding: 10px 12px;
       }
 
-      .usage-fill {
-        height: 100%;
-        border-radius: 999px;
-        background: linear-gradient(90deg, #0f766e 0%, #d97706 100%);
-      }
-
-      .usage-reset {
-        font-size: 12px;
-        color: var(--muted);
-      }
-
-      details summary {
+      summary {
         cursor: pointer;
+        color: var(--muted);
       }
 
       pre {
+        margin: 12px 0 0;
         white-space: pre-wrap;
         word-break: break-word;
-        margin: 8px 0 0;
+        font-family: "SF Mono", "Cascadia Code", monospace;
         font-size: 12px;
       }
 
-      @media (max-width: 820px) {
-        .toolbar {
-          flex-direction: column;
-          align-items: flex-start;
-        }
+      .usage-list {
+        display: grid;
+        gap: 10px;
+      }
 
-        table,
-        thead,
-        tbody,
-        tr,
-        td,
-        th {
-          display: block;
-        }
+      .usage-item {
+        display: grid;
+        gap: 6px;
+      }
 
-        thead {
-          display: none;
-        }
+      .usage-label {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--muted);
+        font-size: 12px;
+      }
 
-        tr {
-          padding: 12px 0;
-          border-bottom: 1px solid var(--line);
-        }
+      .bar {
+        height: 10px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.08);
+      }
 
-        td {
-          border: 0;
-          padding: 6px 0;
-        }
+      .fill {
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #0f766e, #14b8a6);
+      }
+
+      .usage-note {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      @media (max-width: 720px) {
+        .page { padding: 18px 12px 32px; }
+        .hero { flex-direction: column; }
       }
     </style>
   </head>
   <body>
-    <div class="shell">
-      <section class="hero">
-        <div class="hero-top">
-          <div class="lang-switch">
-            <button id="langZh" type="button" class="secondary">中文</button>
-            <button id="langEn" type="button" class="secondary">EN</button>
+    <div class="page">
+      <div class="shell">
+        <div class="hero">
+          <div>
+            <h1>sgproxy</h1>
+            <div class="subtitle">LeenHawk &lt;leenhawk@leenhawk.com&gt;</div>
+          </div>
+          <div class="lang">
+            <button id="langZh" class="active">中文</button>
+            <button id="langEn">EN</button>
           </div>
         </div>
-        <h1 id="heroTitle">SGPROXY</h1>
-        <div class="byline">LeenHawk &lt;leenhawk@leenhawk.com&gt;</div>
-      </section>
 
-      <section id="loginView" class="card">
-        <h2 id="loginTitle">Login</h2>
-        <div class="stack">
-          <label id="adminTokenLabel">Admin Token <input id="adminToken" class="mono" placeholder="Bearer token" /></label>
+        <div id="usagePage" class="card stack hidden">
+          <div id="publicStatus" class="status">Loading...</div>
+          <div id="publicList" class="grid"></div>
+        </div>
+
+        <div id="loginPage" class="card stack hidden">
+          <div id="loginTitle" style="font-size:20px;font-weight:700;">登录</div>
+          <input id="tokenInput" placeholder="Bearer token" />
           <div class="row">
-            <button id="saveToken">Login</button>
+            <button id="loginBtn">登录</button>
+            <button id="clearBtn" class="secondary">清空</button>
           </div>
-          <div id="loginBanner" class="status"></div>
-        </div>
-      </section>
-
-      <section id="appView" class="hidden">
-        <div class="toolbar">
-          <div class="toolbar-title mono" id="sessionTokenPreview"></div>
-          <div class="row">
-            <button id="reloadAll" class="secondary">Refresh Limits</button>
-            <button id="logout" class="secondary admin-only">Logout</button>
-          </div>
+          <div id="loginStatus" class="status">输入 ADMIN_TOKEN。</div>
         </div>
 
-        <div id="appBanner" class="status" style="margin-bottom: 18px">Ready.</div>
-
-        <div class="tabs">
-          <button class="tab active admin-only" data-tab="configPanel">Config</button>
-          <button class="tab admin-only" data-tab="oauthPanel">OAuth</button>
-          <button class="tab" data-tab="credentialsPanel">Credentials</button>
-        </div>
-
-        <section id="configPanel" class="card tab-panel">
-          <h2 id="configTitle">Config</h2>
-          <div class="stack">
-            <label id="hostLabel">Host <input id="host" /></label>
-            <label id="portLabel">Port <input id="port" type="number" /></label>
-            <label id="proxyLabel">Proxy <input id="proxy" placeholder="http://127.0.0.1:7890 or socks5h://127.0.0.1:1080" /></label>
-            <div class="row">
-              <button id="saveConfig">Save Config</button>
-            </div>
+        <div id="adminPage" class="hidden">
+          <div class="tabs">
+            <button class="tab active" data-tab="credentials" id="credentialsTab">凭证</button>
+            <button class="tab" data-tab="oauth" id="oauthTab">OAuth</button>
           </div>
-        </section>
 
-        <section id="oauthPanel" class="card tab-panel hidden">
-          <h2 id="oauthTitle">OAuth Import</h2>
-          <div class="stack">
-            <div class="row">
-              <button id="startOauth">Start OAuth</button>
-            </div>
-            <label id="callbackLabel">Callback URL or Claude Code <textarea id="callbackUrl" class="mono"></textarea></label>
-            <div class="row">
-              <button id="completeOauth">Complete OAuth</button>
-            </div>
-          </div>
-        </section>
+          <div id="globalStatus" class="status hidden"></div>
 
-        <section id="credentialsPanel" class="card tab-panel hidden">
-          <h2 id="credentialsTitle">Credentials</h2>
-          <div class="stack">
-            <div class="stack admin-only">
-              <label id="importLabel">Import JSON <textarea id="importJson" class="mono"></textarea></label>
+          <div id="credentialsPanel" class="card stack">
+            <div class="toolbar">
+              <button id="refreshBtn" class="secondary">刷新</button>
+              <button id="logoutBtn" class="secondary">退出</button>
+            </div>
+            <div class="stack">
+              <div style="font-size:16px;font-weight:700;" id="importTitle">导入凭证 JSON</div>
+              <textarea id="importInput" placeholder="{&quot;access_token&quot;:&quot;...&quot;}"></textarea>
               <div class="row">
-                <button id="importCredential">Import Credential</button>
+                <button id="importBtn">导入</button>
               </div>
             </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Limits</th>
-                  <th class="admin-only">JSON</th>
-                  <th class="admin-only">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="credentialRows"></tbody>
-            </table>
+            <div id="credentialList" class="grid"></div>
           </div>
-        </section>
-      </section>
+
+          <div id="oauthPanel" class="card stack hidden">
+            <div style="font-size:16px;font-weight:700;" id="oauthTitle">OAuth 导入</div>
+            <div class="row">
+              <button id="oauthStartBtn">打开授权页</button>
+            </div>
+            <textarea id="oauthCallbackInput" placeholder="粘贴 callback URL 或 code"></textarea>
+            <div class="row">
+              <button id="oauthCallbackBtn">完成导入</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
-      window.__SGPROXY_VIEW_MODE = "__SGPROXY_VIEW_MODE__";
-
-      const VIEW_MODE = window.__SGPROXY_VIEW_MODE || "admin";
-      const IS_USAGE_VIEW = VIEW_MODE === "usage";
-      const PUBLIC_API_BASE = "/api/public";
-      const API_BASE = IS_USAGE_VIEW ? PUBLIC_API_BASE : "/api";
-
-      const adminTokenEl = document.getElementById("adminToken");
-      const loginViewEl = document.getElementById("loginView");
-      const appViewEl = document.getElementById("appView");
-      const loginBannerEl = document.getElementById("loginBanner");
-      const appBannerEl = document.getElementById("appBanner");
-      const sessionTokenPreviewEl = document.getElementById("sessionTokenPreview");
-      const credentialRowsEl = document.getElementById("credentialRows");
-      const tabButtons = Array.from(document.querySelectorAll(".tab"));
-      const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
-      const adminOnlyEls = Array.from(document.querySelectorAll(".admin-only"));
-      const langZhEl = document.getElementById("langZh");
-      const langEnEl = document.getElementById("langEn");
-
-      const configFields = {
-        host: document.getElementById("host"),
-        port: document.getElementById("port"),
-        proxy: document.getElementById("proxy")
-      };
-
-      const oauthFields = {
-        callbackUrl: document.getElementById("callbackUrl")
-      };
-
-      const importFields = {
-        importJson: document.getElementById("importJson")
-      };
+      const MODE = "__SGPROXY_VIEW_MODE__";
+      const TOKEN_KEY = "sgproxy_admin_token";
+      const LANG_KEY = "sgproxy_lang";
+      let lang = localStorage.getItem(LANG_KEY) || "zh";
 
       const I18N = {
         zh: {
-          heroTitle: "SGPROXY",
-          heroTitleUsage: "SGPROXY 限额",
-          loginTitle: "登录",
-          adminTokenLabel: "管理令牌",
-          saveToken: "登录",
-          reloadAll: "刷新限额",
+          login: "登录",
           logout: "退出",
-          tabConfig: "配置",
-          tabOAuth: "OAuth",
-          tabCredentials: "凭证",
-          configTitle: "配置",
-          hostLabel: "监听地址",
-          portLabel: "端口",
-          proxyLabel: "代理",
-          saveConfig: "保存配置",
-          oauthTitle: "OAuth",
-          startOauth: "开始 OAuth",
-          callbackLabel: "回调链接或 Claude Code",
-          completeOauth: "完成 OAuth",
-          credentialsTitle: "凭证",
-          usageTitle: "限额",
-          importLabel: "导入凭证 JSON",
-          importCredential: "导入凭证",
-          thEmail: "邮箱",
-          thStatus: "状态",
-          thUsage: "限额",
-          thJson: "JSON",
-          thActions: "操作",
-          usageView: "限额视图",
-          keyPrefix: "密钥: ",
-          ready: "就绪。",
-          usageRefreshed: "限额已刷新。",
-          loaded: "配置和限额已加载。",
-          copied: "凭证 JSON 已复制。",
-          usageLoaded: "限额已加载。",
-          saved: "配置已保存。",
-          oauthStarted: "OAuth 已开始。",
-          oauthSaved: "OAuth 凭证已保存。",
-          importSaved: "凭证已导入。",
-          loginHint: "",
-          logoutHint: "",
-          detailsJson: "查看凭证",
-          detailsUsage: "查看限额",
-          loading: "加载中...",
-          actionDisable: "停用",
-          actionEnable: "启用",
-          actionCopy: "复制",
-          actionDelete: "删除",
-          statusHealthy: "健康",
-          statusCooldown5h: "五小时冷却",
-          statusCooldownSonnet7d: "七天 Sonnet 冷却",
-          statusCooldown7d: "七天冷却",
-          statusDead: "死亡",
-          statusUntil: "至",
-          statusReset: "重置于",
-          statusNoReset: "无重置窗口",
-          usage5h: "5小时",
-          usage7d: "7天",
-          usage7dSonnet: "7天 Sonnet",
-          callbackPlaceholder: "粘贴code",
-          proxyPlaceholder: "http://127.0.0.1:7890 或 socks5h://127.0.0.1:1080",
-          importPlaceholder: "{\n  \"refresh_token\": \"sk-ant-ort01-...\",\n  \"access_token\": \"sk-ant-oat01-...\"\n}"
+          clear: "清空",
+          loginHint: "输入 ADMIN_TOKEN。",
+          refresh: "刷新",
+          credentials: "凭证",
+          oauth: "OAuth",
+          importTitle: "导入凭证 JSON",
+          importBtn: "导入",
+          oauthTitle: "OAuth 导入",
+          oauthOpen: "打开授权页",
+          oauthFinish: "完成导入",
+          enabled: "已启用",
+          disabled: "已停用",
+          copy: "复制",
+          copied: "已复制",
+          delete: "删除",
+          enable: "启用",
+          disable: "停用",
+          credentialJson: "凭证 JSON",
+          usageJson: "限额",
+          publicReady: "公开限额页",
+          imported: "导入完成",
+          opened: "已打开授权页",
+          refreshed: "已刷新",
+          unauthorized: "未授权",
+          noCredentials: "暂无凭证",
+          lastError: "错误",
+          orderPrefix: "顺序"
         },
         en: {
-          heroTitle: "SGPROXY",
-          heroTitleUsage: "SGPROXY LIMITS",
-          loginTitle: "Login",
-          adminTokenLabel: "Admin Token",
-          saveToken: "Login",
-          reloadAll: "Refresh Limits",
+          login: "Login",
           logout: "Logout",
-          tabConfig: "Config",
-          tabOAuth: "OAuth",
-          tabCredentials: "Credentials",
-          configTitle: "Config",
-          hostLabel: "Host",
-          portLabel: "Port",
-          proxyLabel: "Proxy",
-          saveConfig: "Save Config",
-          oauthTitle: "OAuth",
-          startOauth: "Start OAuth",
-          callbackLabel: "Callback URL or Claude Code",
-          completeOauth: "Complete OAuth",
-          credentialsTitle: "Credentials",
-          usageTitle: "Limits",
-          importLabel: "Import Credential JSON",
-          importCredential: "Import Credential",
-          thEmail: "Email",
-          thStatus: "Status",
-          thUsage: "Limits",
-          thJson: "JSON",
-          thActions: "Actions",
-          usageView: "limits view",
-          keyPrefix: "key: ",
-          ready: "Ready.",
-          usageRefreshed: "Limits refreshed.",
-          loaded: "Loaded config and limits.",
-          copied: "Credential JSON copied.",
-          usageLoaded: "Limits loaded.",
-          saved: "Config saved.",
-          oauthStarted: "OAuth started.",
-          oauthSaved: "OAuth credential saved.",
-          importSaved: "Credential imported.",
-          loginHint: "",
-          logoutHint: "",
-          detailsJson: "view credential",
-          detailsUsage: "view limits",
-          loading: "loading...",
-          actionDisable: "Disable",
-          actionEnable: "Enable",
-          actionCopy: "Copy",
-          actionDelete: "Delete",
-          statusHealthy: "healthy",
-          statusCooldown5h: "5h cooldown",
-          statusCooldownSonnet7d: "7d Sonnet cooldown",
-          statusCooldown7d: "7d cooldown",
-          statusDead: "dead",
-          statusUntil: "until",
-          statusReset: "reset",
-          statusNoReset: "no reset window",
-          usage5h: "5h",
-          usage7d: "7d",
-          usage7dSonnet: "7d sonnet",
-          callbackPlaceholder: "paste code",
-          proxyPlaceholder: "http://127.0.0.1:7890 or socks5h://127.0.0.1:1080",
-          importPlaceholder: "{\n  \"refresh_token\": \"sk-ant-ort01-...\",\n  \"access_token\": \"sk-ant-oat01-...\"\n}"
+          clear: "Clear",
+          loginHint: "Enter ADMIN_TOKEN.",
+          refresh: "Refresh",
+          credentials: "Credentials",
+          oauth: "OAuth",
+          importTitle: "Import Credential JSON",
+          importBtn: "Import",
+          oauthTitle: "OAuth Import",
+          oauthOpen: "Open Auth Page",
+          oauthFinish: "Complete Import",
+          enabled: "Enabled",
+          disabled: "Disabled",
+          copy: "Copy",
+          copied: "Copied",
+          delete: "Delete",
+          enable: "Enable",
+          disable: "Disable",
+          credentialJson: "Credential JSON",
+          usageJson: "Quota",
+          publicReady: "Public quota page",
+          imported: "Imported",
+          opened: "Auth page opened",
+          refreshed: "Refreshed",
+          unauthorized: "Unauthorized",
+          noCredentials: "No credentials",
+          lastError: "Error",
+          orderPrefix: "Order"
         }
       };
 
-      const storedLang = localStorage.getItem("sgproxy_lang");
-      let currentLang = storedLang === "zh" || storedLang === "en"
-        ? storedLang
-        : "zh";
-      let lastCredentials = [];
-      let bannerState = { message: "", isError: false, translate: false };
-
-      adminTokenEl.value = localStorage.getItem("sgproxy_admin_token") || "";
-      applyMode();
-      applyLanguage();
-      applyAuthState();
+      const els = {
+        loginPage: document.getElementById("loginPage"),
+        adminPage: document.getElementById("adminPage"),
+        usagePage: document.getElementById("usagePage"),
+        loginTitle: document.getElementById("loginTitle"),
+        loginBtn: document.getElementById("loginBtn"),
+        clearBtn: document.getElementById("clearBtn"),
+        loginStatus: document.getElementById("loginStatus"),
+        tokenInput: document.getElementById("tokenInput"),
+        refreshBtn: document.getElementById("refreshBtn"),
+        logoutBtn: document.getElementById("logoutBtn"),
+        importTitle: document.getElementById("importTitle"),
+        importInput: document.getElementById("importInput"),
+        importBtn: document.getElementById("importBtn"),
+        credentialList: document.getElementById("credentialList"),
+        oauthTitle: document.getElementById("oauthTitle"),
+        oauthStartBtn: document.getElementById("oauthStartBtn"),
+        oauthCallbackInput: document.getElementById("oauthCallbackInput"),
+        oauthCallbackBtn: document.getElementById("oauthCallbackBtn"),
+        credentialsTab: document.getElementById("credentialsTab"),
+        oauthTab: document.getElementById("oauthTab"),
+        credentialsPanel: document.getElementById("credentialsPanel"),
+        oauthPanel: document.getElementById("oauthPanel"),
+        globalStatus: document.getElementById("globalStatus"),
+        publicStatus: document.getElementById("publicStatus"),
+        publicList: document.getElementById("publicList"),
+        langZh: document.getElementById("langZh"),
+        langEn: document.getElementById("langEn")
+      };
 
       function t(key) {
-        return I18N[currentLang][key] || I18N.en[key] || key;
+        return (I18N[lang] && I18N[lang][key]) || key;
       }
 
-      function setLanguage(lang) {
-        currentLang = lang === "zh" ? "zh" : "en";
-        localStorage.setItem("sgproxy_lang", currentLang);
-        applyLanguage();
-        applyMode();
-        applyAuthState();
+      function setStatus(target, message, isError = false) {
+        if (!target) return;
+        target.textContent = message;
+        target.classList.toggle("error", isError);
+        target.classList.remove("hidden");
       }
 
-      function applyLanguage() {
-        document.documentElement.lang = currentLang;
-        document.getElementById("heroTitle").textContent = IS_USAGE_VIEW ? t("heroTitleUsage") : t("heroTitle");
-        document.getElementById("loginTitle").textContent = t("loginTitle");
-        document.getElementById("adminTokenLabel").childNodes[0].textContent = t("adminTokenLabel") + " ";
-        adminTokenEl.placeholder = "Bearer token";
-        document.getElementById("saveToken").textContent = t("saveToken");
-        document.getElementById("reloadAll").textContent = t("reloadAll");
-        document.getElementById("logout").textContent = t("logout");
-        document.querySelector('[data-tab="configPanel"]').textContent = t("tabConfig");
-        document.querySelector('[data-tab="oauthPanel"]').textContent = t("tabOAuth");
-        document.querySelector('[data-tab="credentialsPanel"]').textContent = t("tabCredentials");
-        document.getElementById("configTitle").textContent = t("configTitle");
-        document.getElementById("hostLabel").childNodes[0].textContent = t("hostLabel") + " ";
-        document.getElementById("portLabel").childNodes[0].textContent = t("portLabel") + " ";
-        document.getElementById("proxyLabel").childNodes[0].textContent = t("proxyLabel") + " ";
-        configFields.proxy.placeholder = t("proxyPlaceholder");
-        document.getElementById("saveConfig").textContent = t("saveConfig");
-        document.getElementById("oauthTitle").textContent = t("oauthTitle");
-        document.getElementById("startOauth").textContent = t("startOauth");
-        document.getElementById("callbackLabel").childNodes[0].textContent = t("callbackLabel") + " ";
-        oauthFields.callbackUrl.placeholder = t("callbackPlaceholder");
-        document.getElementById("completeOauth").textContent = t("completeOauth");
-        document.getElementById("credentialsTitle").textContent = IS_USAGE_VIEW ? t("usageTitle") : t("credentialsTitle");
-        document.getElementById("importLabel").childNodes[0].textContent = t("importLabel") + " ";
-        importFields.importJson.placeholder = t("importPlaceholder");
-        document.getElementById("importCredential").textContent = t("importCredential");
-        const ths = document.querySelectorAll("thead th");
-        ths[0].textContent = t("thEmail");
-        ths[1].textContent = t("thStatus");
-        ths[2].textContent = t("thUsage");
-        ths[3].textContent = t("thJson");
-        ths[4].textContent = t("thActions");
-        langZhEl.classList.toggle("active", currentLang === "zh");
-        langEnEl.classList.toggle("active", currentLang === "en");
-        renderBanner();
-        if (lastCredentials.length) {
-          renderCredentials(lastCredentials);
-        }
-      }
-
-      function applyMode() {
-        if (IS_USAGE_VIEW) {
-          document.getElementById("heroTitle").textContent = t("heroTitleUsage");
-          document.getElementById("credentialsTitle").textContent = t("usageTitle");
-          for (const element of adminOnlyEls) {
-            element.classList.add("hidden");
-          }
-          setActiveTab("credentialsPanel");
-        }
-      }
-
-      function setBanner(message, isError = false) {
-        bannerState = { message, isError, translate: false };
-        renderBanner();
-      }
-
-      function setBannerKey(key, isError = false) {
-        bannerState = { message: key, isError, translate: true };
-        renderBanner();
-      }
-
-      function renderBanner() {
-        const banner = IS_USAGE_VIEW || isAuthenticated() ? appBannerEl : loginBannerEl;
-        banner.textContent = bannerState.translate ? t(bannerState.message) : bannerState.message;
-        banner.className = bannerState.isError ? "status error" : "status";
-      }
-
-      function isAuthenticated() {
-        if (IS_USAGE_VIEW) {
-          return true;
-        }
-        return Boolean(adminTokenEl.value.trim());
-      }
-
-      function applyAuthState() {
-        const authenticated = isAuthenticated();
-        loginViewEl.classList.toggle("hidden", authenticated);
-        appViewEl.classList.toggle("hidden", !authenticated);
-        const token = adminTokenEl.value.trim();
-        sessionTokenPreviewEl.textContent = IS_USAGE_VIEW
-          ? t("usageView")
-          : token
-            ? t("keyPrefix") + token
-            : "";
-      }
-
-      function setActiveTab(id) {
-        for (const button of tabButtons) {
-          button.classList.toggle("active", button.dataset.tab === id);
-        }
-        for (const panel of tabPanels) {
-          panel.classList.toggle("hidden", panel.id !== id);
-        }
-      }
-
-      function populateOauthCallbackFromLocation() {
-        const current = new URL(window.location.href);
-        const code = current.searchParams.get("code");
-        const state = current.searchParams.get("state");
-        if (code || state) {
-          oauthFields.callbackUrl.value = current.toString();
-          setActiveTab("oauthPanel");
-        }
+      function authHeaders() {
+        const token = localStorage.getItem(TOKEN_KEY) || "";
+        return token ? { Authorization: `Bearer ${token}` } : {};
       }
 
       async function api(path, options = {}) {
-        const token = adminTokenEl.value.trim();
-        const headers = new Headers(options.headers || {});
-        headers.set("content-type", "application/json");
-        if (!IS_USAGE_VIEW && token) {
-          headers.set("authorization", "Bearer " + token);
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders(),
+            ...(options.headers || {})
+          }
+        });
+        const text = await response.text();
+        let data = null;
+        if (text) {
+          try { data = JSON.parse(text); } catch { data = text; }
         }
-        const response = await fetch(path, { ...options, headers });
         if (!response.ok) {
-          const payload = await response.json().catch(() => ({ error: response.statusText }));
-          if (!IS_USAGE_VIEW && response.status === 401) {
-            localStorage.removeItem("sgproxy_admin_token");
-            adminTokenEl.value = "";
-            applyAuthState();
-          }
-          throw new Error(payload.error || response.statusText);
+          throw new Error((data && data.error) || text || response.statusText);
         }
-        return response.json();
+        return data;
       }
 
-      async function reloadAll() {
-        if (!isAuthenticated()) {
-          return;
-        }
-        try {
-          if (IS_USAGE_VIEW) {
-            const usageViews = await api(API_BASE + "/credentials");
-            renderCredentials(usageViews);
-            setBannerKey("usageRefreshed");
-            return;
-          }
-
-          const [config, credentials] = await Promise.all([
-            api(API_BASE + "/config"),
-            api(API_BASE + "/credentials")
-          ]);
-          configFields.host.value = config.host;
-          configFields.port.value = config.port;
-          configFields.proxy.value = config.proxy || "";
-          renderCredentials(credentials);
-          setBannerKey("loaded");
-        } catch (error) {
-          setBanner(error.message, true);
-        }
-      }
-
-      function renderCredentials(credentials) {
-        lastCredentials = Array.isArray(credentials) ? credentials : [];
-        credentialRowsEl.innerHTML = "";
-        for (const item of lastCredentials) {
-          const row = document.createElement("tr");
-          const email = item.user_email || item.id;
-          const rawJson = JSON.stringify(buildCredentialJson(item), null, 2);
-          row.innerHTML = `
-            <td>${escapeHtml(email)}</td>
-            <td>${renderStatusCell(item)}</td>
-            <td>${renderUsageCell(item)}</td>
-            <td class="admin-only">${IS_USAGE_VIEW ? "" : renderJsonCell(rawJson)}</td>
-            <td class="admin-only row"></td>
-          `;
-          const actions = row.querySelector("td:last-child");
-          if (!IS_USAGE_VIEW && actions) {
-            const toggle = document.createElement("button");
-            toggle.textContent = item.enabled ? t("actionDisable") : t("actionEnable");
-            toggle.onclick = async () => {
-              await api(API_BASE + "/credentials/" + item.id + "/" + (item.enabled ? "disable" : "enable"), {
-                method: "POST",
-                body: "{}"
-              });
-              reloadAll();
-            };
-
-            const copy = document.createElement("button");
-            copy.textContent = t("actionCopy");
-            copy.className = "secondary";
-            copy.onclick = async () => {
-              await navigator.clipboard.writeText(rawJson);
-              setBannerKey("copied");
-            };
-
-            const remove = document.createElement("button");
-            remove.textContent = t("actionDelete");
-            remove.className = "danger";
-            remove.onclick = async () => {
-              await api(API_BASE + "/credentials/" + item.id, { method: "DELETE", body: "{}" });
-              reloadAll();
-            };
-            actions.append(toggle, copy, remove);
-          }
-          const usageDetails = row.querySelector("details[data-usage-id]");
-          if (usageDetails) {
-            usageDetails.ontoggle = () => {
-              if (usageDetails.open) {
-                loadUsageDetails(usageDetails);
-              }
-            };
-          }
-          credentialRowsEl.append(row);
-        }
-      }
-
-      function renderJsonCell(rawJson) {
-        return `
-          <details>
-            <summary class="mono">${escapeHtml(t("detailsJson"))}</summary>
-            
-            <pre class="mono">${escapeHtml(rawJson)}</pre>
-          </details>
-        `;
-      }
-
-      function renderStatusCell(item) {
-        const status = formatStatusLabel(String(item.status || "healthy"));
-        const resetAt = item.cooldown_until_unix_ms ? formatUnixMs(item.cooldown_until_unix_ms) : null;
-        const error = item.last_error ? `<div class="usage-reset">${escapeHtml(item.last_error)}</div>` : "";
-        const reset = resetAt ? `<div class="usage-reset">${escapeHtml(t("statusUntil"))} ${escapeHtml(resetAt)}</div>` : "";
-        return `<span class="pill">${escapeHtml(status)}</span>${reset}${error}`;
-      }
-
-      function renderUsageCell(item) {
-        if (!IS_USAGE_VIEW) {
+      function usageRows(usage) {
+        const buckets = [
+          ["five_hour", "5h"],
+          ["seven_day", "7d"],
+          ["seven_day_sonnet", "7d sonnet"]
+        ];
+        return buckets.map(([key, label]) => {
+          const item = usage[key] || {};
+          const pct = Number(item.utilization_pct || 0);
+          const reset = item.resets_at || "-";
           return `
-            <details data-usage-id="${escapeHtml(item.id)}">
-              <summary class="mono">${escapeHtml(t("detailsUsage"))}</summary>
-              <div class="usage-stack" data-usage-content>${escapeHtml(t("loading"))}</div>
-            </details>
-          `;
-        }
-        const usage = item.usage || {};
-        const rows = [
-          renderUsageRow(t("usage5h"), usage.five_hour || {}),
-          renderUsageRow(t("usage7d"), usage.seven_day || {}),
-          renderUsageRow(t("usage7dSonnet"), usage.seven_day_sonnet || {})
-        ].filter(Boolean);
-        const error = usage.last_error
-          ? `<div class="usage-reset">${escapeHtml(usage.last_error)}</div>`
-          : "";
-        return `<div class="usage-stack">${rows.join("")}${error}</div>`;
-      }
-
-      async function loadUsageDetails(detailsEl) {
-        if (detailsEl.dataset.loaded === "true" || detailsEl.dataset.loading === "true") {
-          return;
-        }
-        detailsEl.dataset.loading = "true";
-        const contentEl = detailsEl.querySelector("[data-usage-content]");
-        try {
-          const item = await api(API_BASE + "/credentials/usage/" + detailsEl.dataset.usageId);
-          if (contentEl) {
-            contentEl.innerHTML = renderUsageContent(item.usage || {});
-          }
-          detailsEl.dataset.loaded = "true";
-          setBannerKey("usageLoaded");
-        } catch (error) {
-          if (contentEl) {
-            contentEl.textContent = error.message;
-          }
-        } finally {
-          detailsEl.dataset.loading = "false";
-        }
-      }
-
-      function renderUsageContent(usage) {
-        const rows = [
-          renderUsageRow(t("usage5h"), usage.five_hour || {}),
-          renderUsageRow(t("usage7d"), usage.seven_day || {}),
-          renderUsageRow(t("usage7dSonnet"), usage.seven_day_sonnet || {})
-        ].filter(Boolean);
-        const error = usage.last_error
-          ? `<div class="usage-reset">${escapeHtml(usage.last_error)}</div>`
-          : "";
-        return `${rows.join("")}${error}`;
-      }
-
-      function buildCredentialJson(item) {
-        return {
-          access_token: item.access_token ?? null,
-          refresh_token: item.refresh_token ?? null,
-          expires_at_unix_ms: item.expires_at_unix_ms ?? null,
-          user_email: item.user_email ?? null,
-          organization_uuid: item.organization_uuid ?? null,
-          subscription_type: item.subscription_type ?? null,
-          rate_limit_tier: item.rate_limit_tier ?? null,
-          status: item.status ?? null
-        };
-      }
-
-      function renderUsageRow(label, bucket) {
-        const pct = clampPercent(bucket.utilization_pct);
-        const reset = bucket.resets_at ? formatDateString(bucket.resets_at) : null;
-        return `
-          <div class="usage-row">
-            <div class="usage-meta">
-              <span>${escapeHtml(label)}</span>
-              <span>${pct === null ? "--" : pct + "%"}</span>
+            <div class="usage-item">
+              <div class="usage-label">
+                <span>${label}</span>
+                <span>${pct}%</span>
+              </div>
+              <div class="bar"><div class="fill" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>
+              <div class="usage-note">${escapeHtml(reset)}</div>
             </div>
-            <div class="usage-bar"><div class="usage-fill" style="width:${pct === null ? 0 : pct}%"></div></div>
-            <div class="usage-reset">${reset ? escapeHtml(t("statusReset")) + " " + escapeHtml(reset) : escapeHtml(t("statusNoReset"))}</div>
+          `;
+        }).join("");
+      }
+
+      function statusClass(status) {
+        if (status === "healthy") return "healthy";
+        if (status === "dead") return "dead";
+        return "warn";
+      }
+
+      function credentialCard(item) {
+        const enabled = item.enabled ? t("enabled") : t("disabled");
+        const toggleAction = item.enabled ? "disable" : "enable";
+        const toggleLabel = item.enabled ? t("disable") : t("enable");
+        const jsonText = JSON.stringify(item.json || {}, null, 2);
+        const usageText = JSON.stringify(item.usage || {}, null, 2);
+        const email = item.user_email || item.id;
+        return `
+          <div class="credential">
+            <div class="credential-head">
+              <div>
+                <div class="credential-title">${escapeHtml(email)}</div>
+                <div class="meta">
+                  <span class="pill ${statusClass(item.status)}">${escapeHtml(item.status || "")}</span>
+                  <span class="pill">${t("orderPrefix")}: ${item.order ?? "-"}</span>
+                  <span class="pill">${enabled}</span>
+                </div>
+              </div>
+              <div class="row">
+                <button class="secondary" data-copy='${encodeURIComponent(jsonText)}'>${t("copy")}</button>
+                <button class="secondary" data-toggle="${item.id}" data-action="${toggleAction}">${toggleLabel}</button>
+                <button class="danger" data-delete="${item.id}">${t("delete")}</button>
+              </div>
+            </div>
+            ${item.last_error ? `<div class="usage-note">${t("lastError")}: ${escapeHtml(item.last_error)}</div>` : ""}
+            <div class="usage-list">${usageRows(item.usage || {})}</div>
+            <details>
+              <summary>${t("credentialJson")}</summary>
+              <pre>${escapeHtml(jsonText)}</pre>
+            </details>
+            <details>
+              <summary>${t("usageJson")}</summary>
+              <pre>${escapeHtml(usageText)}</pre>
+            </details>
           </div>
         `;
       }
 
-      function formatStatusLabel(status) {
-        if (status === "healthy") return t("statusHealthy");
-        if (status === "cooldown_5h") return t("statusCooldown5h");
-        if (status === "cooldown_sonnet_7d") return t("statusCooldownSonnet7d");
-        if (status === "cooldown_7d" || status === "cooldown_all_7d") return t("statusCooldown7d");
-        if (status === "dead") return t("statusDead");
-        return status;
-      }
-
-      function clampPercent(value) {
-        if (value === null || value === undefined || value === "") {
-          return null;
-        }
-        const number = Number(value);
-        if (!Number.isFinite(number)) {
-          return null;
-        }
-        return Math.max(0, Math.min(100, Math.round(number)));
-      }
-
-      function formatDateString(value) {
-        const date = new Date(value);
-        return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-      }
-
-      function formatUnixMs(value) {
-        const date = new Date(Number(value));
-        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-      }
-
-      function escapeHtml(value) {
-        return String(value)
+      function escapeHtml(input) {
+        return String(input)
           .replaceAll("&", "&amp;")
           .replaceAll("<", "&lt;")
           .replaceAll(">", "&gt;");
       }
 
-      document.getElementById("saveToken").onclick = async () => {
-        localStorage.setItem("sgproxy_admin_token", adminTokenEl.value.trim());
-        applyAuthState();
-        await reloadAll();
-      };
-
-      langZhEl.onclick = () => setLanguage("zh");
-      langEnEl.onclick = () => setLanguage("en");
-
-      document.getElementById("reloadAll").onclick = reloadAll;
-      document.getElementById("logout").onclick = () => {
-        localStorage.removeItem("sgproxy_admin_token");
-        adminTokenEl.value = "";
-        applyAuthState();
-        setBannerKey("logoutHint");
-      };
-
-      for (const button of tabButtons) {
-        button.onclick = () => setActiveTab(button.dataset.tab);
+      async function loadCredentials() {
+        const [credentials, usage] = await Promise.all([
+          api("/api/credentials"),
+          api("/api/credentials/usage")
+        ]);
+        const usageMap = new Map((usage || []).map((item) => [item.id, item]));
+        const merged = (credentials || []).map((item) => ({
+          ...item,
+          ...(usageMap.get(item.id) || {}),
+          json: {
+            access_token: item.access_token,
+            refresh_token: item.refresh_token,
+            expires_at_unix_ms: item.expires_at_unix_ms,
+            user_email: item.user_email,
+            organization_uuid: item.organization_uuid,
+            subscription_type: item.subscription_type,
+            rate_limit_tier: item.rate_limit_tier,
+            status: item.status
+          }
+        }));
+        els.credentialList.innerHTML = merged.length
+          ? merged.map(credentialCard).join("")
+          : `<div class="status">${t("noCredentials")}</div>`;
       }
 
-      document.getElementById("saveConfig").onclick = async () => {
-        try {
-          await api(API_BASE + "/config", {
-            method: "PUT",
-            body: JSON.stringify({
-              host: configFields.host.value.trim(),
-              port: Number(configFields.port.value),
-              proxy: configFields.proxy.value.trim() || null
-            })
-          });
-          setBannerKey("saved");
-          reloadAll();
-        } catch (error) {
-          setBanner(error.message, true);
-        }
-      };
+      async function loadPublic() {
+        const items = await api("/api/public/credentials", {
+          headers: { "content-type": "application/json" }
+        });
+        els.publicList.innerHTML = (items || []).map(credentialCard).join("");
+        setStatus(els.publicStatus, t("publicReady"));
+      }
 
-      document.getElementById("startOauth").onclick = async () => {
+      async function login() {
+        localStorage.setItem(TOKEN_KEY, els.tokenInput.value.trim());
         try {
-          const result = await api(API_BASE + "/oauth/start", {
-            method: "POST",
-            body: JSON.stringify({})
-          });
-          const opened = window.open(result.auth_url, "_blank", "noopener,noreferrer");
-          if (!opened) {
-            window.location.href = result.auth_url;
-          }
-          setBannerKey("oauthStarted");
+          await api("/api/credentials");
+          showAdmin();
+          await refreshAll();
         } catch (error) {
-          setBanner(error.message, true);
+          localStorage.removeItem(TOKEN_KEY);
+          setStatus(els.loginStatus, error.message || t("unauthorized"), true);
         }
-      };
+      }
 
-      document.getElementById("completeOauth").onclick = async () => {
+      function logout() {
+        localStorage.removeItem(TOKEN_KEY);
+        els.tokenInput.value = "";
+        showLogin();
+      }
+
+      function showLogin() {
+        els.loginPage.classList.remove("hidden");
+        els.adminPage.classList.add("hidden");
+      }
+
+      function showAdmin() {
+        els.loginPage.classList.add("hidden");
+        els.adminPage.classList.remove("hidden");
+      }
+
+      function setTab(tab) {
+        const isCredentials = tab === "credentials";
+        els.credentialsTab.classList.toggle("active", isCredentials);
+        els.oauthTab.classList.toggle("active", !isCredentials);
+        els.credentialsPanel.classList.toggle("hidden", !isCredentials);
+        els.oauthPanel.classList.toggle("hidden", isCredentials);
+      }
+
+      async function refreshAll() {
         try {
-          await api(API_BASE + "/oauth/callback", {
-            method: "POST",
-            body: JSON.stringify({ callback_url: oauthFields.callbackUrl.value.trim() })
-          });
-          oauthFields.callbackUrl.value = "";
-          setBannerKey("oauthSaved");
-          reloadAll();
+          await loadCredentials();
+          setStatus(els.globalStatus, t("refreshed"));
         } catch (error) {
-          setBanner(error.message, true);
+          setStatus(els.globalStatus, error.message, true);
         }
-      };
+      }
 
-      document.getElementById("importCredential").onclick = async () => {
+      function applyLanguage() {
+        localStorage.setItem(LANG_KEY, lang);
+        els.langZh.classList.toggle("active", lang === "zh");
+        els.langEn.classList.toggle("active", lang === "en");
+        els.loginTitle.textContent = t("login");
+        els.loginBtn.textContent = t("login");
+        els.clearBtn.textContent = t("clear");
+        els.loginStatus.textContent = t("loginHint");
+        els.refreshBtn.textContent = t("refresh");
+        els.logoutBtn.textContent = t("logout");
+        els.credentialsTab.textContent = t("credentials");
+        els.oauthTab.textContent = t("oauth");
+        els.importTitle.textContent = t("importTitle");
+        els.importBtn.textContent = t("importBtn");
+        els.oauthTitle.textContent = t("oauthTitle");
+        els.oauthStartBtn.textContent = t("oauthOpen");
+        els.oauthCallbackBtn.textContent = t("oauthFinish");
+      }
+
+      els.langZh.addEventListener("click", async () => {
+        lang = "zh";
+        applyLanguage();
+        await refreshVisible();
+      });
+      els.langEn.addEventListener("click", async () => {
+        lang = "en";
+        applyLanguage();
+        await refreshVisible();
+      });
+      els.loginBtn.addEventListener("click", login);
+      els.clearBtn.addEventListener("click", () => {
+        els.tokenInput.value = "";
+        localStorage.removeItem(TOKEN_KEY);
+      });
+      els.refreshBtn.addEventListener("click", refreshAll);
+      els.logoutBtn.addEventListener("click", logout);
+      els.credentialsTab.addEventListener("click", () => setTab("credentials"));
+      els.oauthTab.addEventListener("click", () => setTab("oauth"));
+
+      els.importBtn.addEventListener("click", async () => {
         try {
-          const payload = JSON.parse(importFields.importJson.value.trim() || "{}");
-          await api(API_BASE + "/credentials", {
+          const payload = JSON.parse(els.importInput.value || "{}");
+          await api("/api/credentials", {
             method: "POST",
             body: JSON.stringify(payload)
           });
-          importFields.importJson.value = "";
-          setBannerKey("importSaved");
-          reloadAll();
+          els.importInput.value = "";
+          await refreshAll();
+          setStatus(els.globalStatus, t("imported"));
         } catch (error) {
-          setBanner(error.message, true);
+          setStatus(els.globalStatus, error.message, true);
         }
-      };
+      });
 
-      setBannerKey(IS_USAGE_VIEW || isAuthenticated() ? "ready" : "loginHint");
+      els.oauthStartBtn.addEventListener("click", async () => {
+        try {
+          const payload = await api("/api/oauth/start", {
+            method: "POST",
+            body: "{}"
+          });
+          window.open(payload.auth_url, "_blank", "noopener");
+          setStatus(els.globalStatus, t("opened"));
+        } catch (error) {
+          setStatus(els.globalStatus, error.message, true);
+        }
+      });
 
-      if (IS_USAGE_VIEW) {
-        reloadAll();
-      } else if (isAuthenticated()) {
-        populateOauthCallbackFromLocation();
-        reloadAll();
+      els.oauthCallbackBtn.addEventListener("click", async () => {
+        try {
+          await api("/api/oauth/callback", {
+            method: "POST",
+            body: JSON.stringify({ callback_url: els.oauthCallbackInput.value })
+          });
+          els.oauthCallbackInput.value = "";
+          await refreshAll();
+          setStatus(els.globalStatus, t("imported"));
+          setTab("credentials");
+        } catch (error) {
+          setStatus(els.globalStatus, error.message, true);
+        }
+      });
+
+      els.credentialList.addEventListener("click", async (event) => {
+        const button = event.target.closest("button");
+        if (!button) return;
+        try {
+          if (button.dataset.copy) {
+            await navigator.clipboard.writeText(decodeURIComponent(button.dataset.copy));
+            setStatus(els.globalStatus, t("copied"));
+            return;
+          }
+          if (button.dataset.delete) {
+            await api(`/api/credentials/${button.dataset.delete}`, { method: "DELETE" });
+            await refreshAll();
+            return;
+          }
+          if (button.dataset.toggle) {
+            await api(`/api/credentials/${button.dataset.toggle}/${button.dataset.action}`, {
+              method: "POST",
+              body: "{}"
+            });
+            await refreshAll();
+          }
+        } catch (error) {
+          setStatus(els.globalStatus, error.message, true);
+        }
+      });
+
+      async function refreshVisible() {
+        if (MODE === "usage") {
+          await loadPublic();
+        } else if (localStorage.getItem(TOKEN_KEY)) {
+          await refreshAll();
+        }
       }
+
+      async function boot() {
+        applyLanguage();
+        if (MODE === "usage") {
+          els.usagePage.classList.remove("hidden");
+          await loadPublic();
+          return;
+        }
+        const token = localStorage.getItem(TOKEN_KEY) || "";
+        els.tokenInput.value = token;
+        if (token) {
+          try {
+            await api("/api/credentials");
+            showAdmin();
+            await refreshAll();
+            return;
+          } catch (_) {
+            localStorage.removeItem(TOKEN_KEY);
+          }
+        }
+        showLogin();
+      }
+
+      boot();
     </script>
   </body>
 </html>
