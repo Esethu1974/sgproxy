@@ -1,10 +1,14 @@
 use anyhow::Result;
+use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 use url::Url;
 use worker::{Fetch, Headers, Request, RequestInit, Response};
 
 use crate::config::{
-    CredentialConfig, DEFAULT_ANTHROPIC_VERSION, DEFAULT_BASE_URL, DEFAULT_REQUIRED_BETA,
-    DEFAULT_USER_AGENT,
+    CLAUDE_CODE_BILLING_CCH, CLAUDE_CODE_BILLING_ENTRYPOINT, CLAUDE_CODE_BILLING_HEADER_PREFIX,
+    CLAUDE_CODE_BILLING_SALT, CredentialConfig, DEFAULT_ANTHROPIC_VERSION, DEFAULT_BASE_URL,
+    DEFAULT_REQUIRED_BETA, DEFAULT_USER_AGENT, MAGIC_TRIGGER_1H_ID, MAGIC_TRIGGER_5M_ID,
+    MAGIC_TRIGGER_AUTO_ID,
 };
 
 pub struct ProxyOutcome {
@@ -12,13 +16,19 @@ pub struct ProxyOutcome {
     pub status_code: u16,
 }
 
-pub async fn proxy_request(req: Request, credential: &CredentialConfig) -> Result<ProxyOutcome> {
+pub async fn proxy_request(
+    mut req: Request,
+    credential: &CredentialConfig,
+) -> Result<ProxyOutcome> {
     let upstream_url = build_upstream_url(&req)?;
     let headers = build_upstream_headers(req.headers(), credential.access_token.as_str())?;
+    let transformed_body = maybe_prepare_json_body(&mut req).await?;
 
     let mut init = RequestInit::new();
     init.with_method(req.method()).with_headers(headers);
-    if let Some(body) = req.inner().body() {
+    if let Some(body) = transformed_body {
+        init.with_body(Some(body.into()));
+    } else if let Some(body) = req.inner().body() {
         init.with_body(Some(body.into()));
     }
 
@@ -124,4 +134,457 @@ fn is_hop_by_hop(name: &str) -> bool {
             | "transfer-encoding"
             | "upgrade"
     )
+}
+
+async fn maybe_prepare_json_body(req: &mut Request) -> Result<Option<Vec<u8>>> {
+    if !request_body_should_be_rewritten(req) {
+        return Ok(None);
+    }
+
+    let bytes = req.bytes().await?;
+    if bytes.is_empty() {
+        return Ok(Some(bytes));
+    }
+
+    let mut body = match serde_json::from_slice::<Value>(&bytes) {
+        Ok(body) => body,
+        Err(_) => return Ok(Some(bytes)),
+    };
+
+    apply_magic_string_cache_control_triggers(&mut body);
+    apply_claudecode_billing_header_system_block(&mut body, request_claudecode_version(req));
+    Ok(Some(serde_json::to_vec(&body)?))
+}
+
+fn request_body_should_be_rewritten(req: &Request) -> bool {
+    matches!(
+        req.method(),
+        worker::Method::Post | worker::Method::Put | worker::Method::Patch
+    ) && req
+        .headers()
+        .get("content-type")
+        .ok()
+        .flatten()
+        .map(|value| value.to_ascii_lowercase().contains("application/json"))
+        .unwrap_or(false)
+        && req
+            .url()
+            .ok()
+            .map(|url| url.path().starts_with("/v1/"))
+            .unwrap_or(false)
+}
+
+fn request_claudecode_version(req: &Request) -> String {
+    req.headers()
+        .get("user-agent")
+        .ok()
+        .flatten()
+        .and_then(|value| {
+            value
+                .trim()
+                .strip_prefix("claude-code/")
+                .map(ToString::to_string)
+        })
+        .unwrap_or_else(|| {
+            DEFAULT_USER_AGENT
+                .strip_prefix("claude-code/")
+                .unwrap_or(DEFAULT_USER_AGENT)
+                .to_string()
+        })
+}
+
+fn apply_claudecode_billing_header_system_block(body: &mut Value, version: String) {
+    canonicalize_claude_body(body);
+    if system_has_claudecode_billing_header(body.get("system")) {
+        return;
+    }
+    let header_text = build_claudecode_billing_header_text(body, &version);
+    let Some(map) = body.as_object_mut() else {
+        return;
+    };
+
+    let header_block = json_text_block(header_text.as_str());
+    match map.remove("system") {
+        Some(Value::Array(mut blocks)) => {
+            blocks.retain(|block| !is_claudecode_billing_header_block(block));
+            blocks.insert(0, header_block);
+            map.insert("system".to_string(), Value::Array(blocks));
+        }
+        Some(value) => {
+            let mut blocks = vec![header_block];
+            if !is_claudecode_billing_header_block(&value) {
+                blocks.push(value);
+            }
+            map.insert("system".to_string(), Value::Array(blocks));
+        }
+        None => {
+            map.insert("system".to_string(), Value::Array(vec![header_block]));
+        }
+    }
+}
+
+fn build_claudecode_billing_header_text(body: &Value, version: &str) -> String {
+    let user_text = first_claudecode_user_text(body);
+    let version_hash = claudecode_billing_version_hash(user_text.as_str(), version);
+    format!(
+        "{} cc_version={}.{}; cc_entrypoint={}; cch={};",
+        CLAUDE_CODE_BILLING_HEADER_PREFIX,
+        version,
+        version_hash,
+        CLAUDE_CODE_BILLING_ENTRYPOINT,
+        CLAUDE_CODE_BILLING_CCH,
+    )
+}
+
+fn first_claudecode_user_text(body: &Value) -> String {
+    body.get("messages")
+        .and_then(Value::as_array)
+        .and_then(|messages| {
+            messages.iter().find_map(|message| {
+                let message_map = message.as_object()?;
+                if message_map.get("role").and_then(Value::as_str) != Some("user") {
+                    return None;
+                }
+                message_map
+                    .get("content")
+                    .and_then(first_text_from_claude_content)
+            })
+        })
+        .unwrap_or_default()
+}
+
+fn first_text_from_claude_content(content: &Value) -> Option<String> {
+    match content {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(blocks) => blocks.iter().find_map(first_text_from_claude_block),
+        Value::Object(_) => first_text_from_claude_block(content),
+        _ => None,
+    }
+}
+
+fn first_text_from_claude_block(block: &Value) -> Option<String> {
+    let block_map = block.as_object()?;
+    if block_map.get("type").and_then(Value::as_str) != Some("text") {
+        return None;
+    }
+    block_map
+        .get("text")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn claudecode_billing_version_hash(message_text: &str, version: &str) -> String {
+    let sampled = sampled_js_utf16_positions(message_text, &[4, 7, 20]);
+    sha256_hex_prefix(
+        format!("{}{}{}", CLAUDE_CODE_BILLING_SALT, sampled, version).as_str(),
+        3,
+    )
+}
+
+fn sampled_js_utf16_positions(text: &str, indices: &[usize]) -> String {
+    let utf16 = text.encode_utf16().collect::<Vec<_>>();
+    let mut sampled = String::new();
+    for index in indices {
+        match utf16.get(*index).copied() {
+            Some(unit) => sampled.push(js_utf16_unit_char(unit)),
+            None => sampled.push('0'),
+        }
+    }
+    sampled
+}
+
+fn js_utf16_unit_char(unit: u16) -> char {
+    char::from_u32(unit as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
+}
+
+fn sha256_hex_prefix(value: &str, len: usize) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    let hex = format!("{digest:x}");
+    hex[..len.min(hex.len())].to_string()
+}
+
+fn is_claudecode_billing_header_block(block: &Value) -> bool {
+    block
+        .as_object()
+        .and_then(|block_map| block_map.get("text"))
+        .and_then(Value::as_str)
+        .map(str::trim_start)
+        .is_some_and(|text| text.starts_with(CLAUDE_CODE_BILLING_HEADER_PREFIX))
+}
+
+fn system_has_claudecode_billing_header(system: Option<&Value>) -> bool {
+    let Some(system) = system else {
+        return false;
+    };
+
+    match system {
+        Value::Array(blocks) => blocks.iter().any(is_claudecode_billing_header_block),
+        value => is_claudecode_billing_header_block(value),
+    }
+}
+
+fn canonicalize_claude_body(body: &mut Value) {
+    let Some(root) = body.as_object_mut() else {
+        return;
+    };
+
+    if let Some(system) = root.get_mut("system") {
+        canonicalize_claude_system(system);
+    }
+
+    if let Some(messages) = root.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            canonicalize_claude_message(message);
+        }
+    }
+}
+
+fn canonicalize_claude_system(system: &mut Value) {
+    match system {
+        Value::String(text) => {
+            let text = std::mem::take(text);
+            *system = Value::Array(vec![json_text_block(text.as_str())]);
+        }
+        Value::Array(blocks) => canonicalize_claude_blocks(blocks),
+        _ => {}
+    }
+}
+
+fn canonicalize_claude_message(message: &mut Value) {
+    let Some(message_map) = message.as_object_mut() else {
+        return;
+    };
+    let Some(content) = message_map.get_mut("content") else {
+        return;
+    };
+    canonicalize_claude_content(content);
+}
+
+fn canonicalize_claude_content(content: &mut Value) {
+    match content {
+        Value::String(text) => {
+            let text = std::mem::take(text);
+            *content = Value::Array(vec![json_text_block(text.as_str())]);
+        }
+        Value::Object(_) => {
+            let block = std::mem::take(content);
+            *content = Value::Array(vec![block]);
+        }
+        Value::Array(blocks) => canonicalize_claude_blocks(blocks),
+        _ => {}
+    }
+}
+
+fn canonicalize_claude_blocks(blocks: &mut Vec<Value>) {
+    for block in blocks {
+        if let Value::String(text) = block {
+            let text = std::mem::take(text);
+            *block = json_text_block(text.as_str());
+        }
+    }
+}
+
+fn json_text_block(text: &str) -> Value {
+    json!({
+        "type": "text",
+        "text": text,
+    })
+}
+
+fn apply_magic_string_cache_control_triggers(body: &mut Value) {
+    canonicalize_claude_body(body);
+    let Some(root) = body.as_object_mut() else {
+        return;
+    };
+    let existing_breakpoints = existing_cache_breakpoint_count(root);
+    let mut remaining_slots = 4usize.saturating_sub(existing_breakpoints);
+
+    if let Some(system) = root.get_mut("system") {
+        apply_magic_trigger_to_content(system, &mut remaining_slots);
+    }
+
+    if let Some(messages) = root.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            let Some(message_map) = message.as_object_mut() else {
+                continue;
+            };
+            let Some(content) = message_map.get_mut("content") else {
+                continue;
+            };
+            apply_magic_trigger_to_content(content, &mut remaining_slots);
+        }
+    }
+}
+
+fn apply_magic_trigger_to_content(content: &mut Value, remaining_slots: &mut usize) {
+    match content {
+        Value::Array(blocks) => {
+            for block in blocks {
+                let Some(block_map) = block.as_object_mut() else {
+                    continue;
+                };
+                apply_magic_trigger_to_block(block_map, remaining_slots);
+            }
+        }
+        Value::Object(block_map) => apply_magic_trigger_to_block(block_map, remaining_slots),
+        _ => {}
+    }
+}
+
+fn apply_magic_trigger_to_block(
+    block_map: &mut serde_json::Map<String, Value>,
+    remaining_slots: &mut usize,
+) {
+    let Some(Value::String(text)) = block_map.get_mut("text") else {
+        return;
+    };
+
+    let ttl = remove_magic_trigger_tokens(text);
+    let Some(ttl) = ttl else {
+        return;
+    };
+
+    if *remaining_slots > 0 && !block_map.contains_key("cache_control") {
+        block_map.insert("cache_control".to_string(), cache_control_ephemeral(ttl));
+        *remaining_slots = remaining_slots.saturating_sub(1);
+    }
+}
+
+fn remove_magic_trigger_tokens(text: &mut String) -> Option<Option<&'static str>> {
+    let specs = [
+        (MAGIC_TRIGGER_AUTO_ID, None),
+        (MAGIC_TRIGGER_5M_ID, Some("5m")),
+        (MAGIC_TRIGGER_1H_ID, Some("1h")),
+    ];
+
+    let mut matched_ttl = None;
+    for (id, ttl) in specs {
+        if text.contains(id) {
+            *text = text.replace(id, "");
+            if matched_ttl.is_none() {
+                matched_ttl = Some(ttl);
+            }
+        }
+    }
+
+    matched_ttl
+}
+
+fn cache_control_ephemeral(ttl: Option<&'static str>) -> Value {
+    let mut cache_control = json!({
+        "type": "ephemeral",
+    });
+    if let Some(ttl) = ttl {
+        cache_control["ttl"] = json!(ttl);
+    }
+    cache_control
+}
+
+fn existing_cache_breakpoint_count(root: &serde_json::Map<String, Value>) -> usize {
+    let mut count = 0;
+
+    if root.contains_key("cache_control") {
+        count += 1;
+    }
+
+    if let Some(system) = root.get("system") {
+        count += count_cache_controls_in_content(system);
+    }
+
+    if let Some(messages) = root.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            let Some(content) = message.as_object().and_then(|item| item.get("content")) else {
+                continue;
+            };
+            count += count_cache_controls_in_content(content);
+        }
+    }
+
+    count
+}
+
+fn count_cache_controls_in_content(content: &Value) -> usize {
+    match content {
+        Value::Array(items) => items
+            .iter()
+            .filter(|item| {
+                item.as_object()
+                    .is_some_and(|map| map.contains_key("cache_control"))
+            })
+            .count(),
+        Value::Object(map) => usize::from(map.contains_key("cache_control")),
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn injects_billing_header_when_missing() {
+        let mut body = json!({
+            "messages": [
+                {"role":"user","content":"hello world"}
+            ]
+        });
+
+        apply_claudecode_billing_header_system_block(&mut body, "2.1.81".to_string());
+
+        let system = body["system"].as_array().unwrap();
+        let text = system[0]["text"].as_str().unwrap();
+        assert!(text.starts_with("x-anthropic-billing-header: cc_version=2.1.81."));
+        assert!(text.contains("cc_entrypoint=cli; cch=00000;"));
+    }
+
+    #[test]
+    fn preserves_existing_billing_header() {
+        let mut body = json!({
+            "system": [
+                {
+                    "type":"text",
+                    "text":"x-anthropic-billing-header: cc_version=already.there; cc_entrypoint=cli; cch=99999;"
+                }
+            ],
+            "messages": [
+                {"role":"user","content":"hello world"}
+            ]
+        });
+
+        apply_claudecode_billing_header_system_block(&mut body, "2.1.81".to_string());
+
+        assert_eq!(
+            body["system"][0]["text"].as_str().unwrap(),
+            "x-anthropic-billing-header: cc_version=already.there; cc_entrypoint=cli; cch=99999;"
+        );
+    }
+
+    #[test]
+    fn applies_magic_string_cache_control() {
+        let mut body = json!({
+            "messages": [
+                {
+                    "role":"user",
+                    "content":[
+                        {
+                            "type":"text",
+                            "text": format!("hello {} world", MAGIC_TRIGGER_5M_ID)
+                        }
+                    ]
+                }
+            ]
+        });
+
+        apply_magic_string_cache_control_triggers(&mut body);
+
+        let block = &body["messages"][0]["content"][0];
+        assert_eq!(block["cache_control"]["type"], json!("ephemeral"));
+        assert_eq!(block["cache_control"]["ttl"], json!("5m"));
+        assert!(
+            !block["text"]
+                .as_str()
+                .unwrap()
+                .contains(MAGIC_TRIGGER_5M_ID)
+        );
+    }
 }

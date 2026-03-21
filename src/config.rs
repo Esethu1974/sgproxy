@@ -8,6 +8,16 @@ pub const DEFAULT_CLAUDE_AI_BASE_URL: &str = "https://claude.ai";
 pub const DEFAULT_REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
 pub const DEFAULT_USER_AGENT: &str = "claude-code/2.1.76";
 pub const DEFAULT_TOKEN_USER_AGENT: &str = "claude-cli/2.1.76 (external, cli)";
+pub const CLAUDE_CODE_BILLING_HEADER_PREFIX: &str = "x-anthropic-billing-header:";
+pub const CLAUDE_CODE_BILLING_ENTRYPOINT: &str = "cli";
+pub const CLAUDE_CODE_BILLING_SALT: &str = "59cf53e54c78";
+pub const CLAUDE_CODE_BILLING_CCH: &str = "00000";
+pub const MAGIC_TRIGGER_AUTO_ID: &str =
+    "GPROXY_MAGIC_STRING_TRIGGER_CACHING_CREATE_7D9ASD7A98SD7A9S8D79ASC98A7FNKJBVV80SCMSHDSIUCH";
+pub const MAGIC_TRIGGER_5M_ID: &str =
+    "GPROXY_MAGIC_STRING_TRIGGER_CACHING_CREATE_49VA1S5V19GR4G89W2V695G9W9GV52W95V198WV5W2FC9DF";
+pub const MAGIC_TRIGGER_1H_ID: &str =
+    "GPROXY_MAGIC_STRING_TRIGGER_CACHING_CREATE_1FAS5GV9R5H29T5Y2J9584K6O95M2NBVW52C95CX984FRJY";
 pub const CLAUDE_CODE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 pub const CLAUDE_CODE_OAUTH_SCOPE: &str = "user:profile user:inference user:sessions:claude_code";
 pub const OAUTH_STATE_TTL_MS: u64 = 10 * 60 * 1000;
