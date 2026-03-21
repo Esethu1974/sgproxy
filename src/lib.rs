@@ -3,7 +3,6 @@ mod do_state;
 mod oauth;
 mod proxy;
 mod state;
-mod tokenizer;
 
 use worker::*;
 

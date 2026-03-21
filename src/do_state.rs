@@ -18,7 +18,6 @@ use crate::state::{
     record_invalid_auth, record_rate_limited, record_success, record_transient, save_doc,
     set_enabled, take_oauth_state, upsert_credential,
 };
-use crate::tokenizer::count_openai_response_input_tokens;
 
 #[durable_object]
 pub struct SgproxyState {
@@ -59,9 +58,6 @@ impl SgproxyState {
         }
         if path == "/v1" || path.starts_with("/v1/") {
             return self.proxy(req, ChannelKind::ClaudeCode).await;
-        }
-        if method == Method::Post && path == "/codex/v1/responses/input_tokens" {
-            return self.codex_input_tokens(req).await;
         }
         if path == "/codex" || path.starts_with("/codex/") {
             return self.proxy(req, ChannelKind::Codex).await;
@@ -451,12 +447,6 @@ impl SgproxyState {
                 json_error(502, &err.to_string()).map_err(Into::into)
             }
         }
-    }
-
-    async fn codex_input_tokens(&self, mut req: Request) -> Result<Response> {
-        let body = req.json::<serde_json::Value>().await?;
-        let response = count_openai_response_input_tokens(&body)?;
-        Ok(Response::from_json(&response)?)
     }
 
     async fn resolve_proxy_credential(
