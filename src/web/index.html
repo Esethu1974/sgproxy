@@ -7,8 +7,11 @@
     <style>
       :root {
         --bg: #f6f3ec;
+        --bg-grad-1: rgba(15, 118, 110, 0.12);
+        --bg-grad-2: rgba(180, 83, 9, 0.12);
         --panel: rgba(255, 255, 255, 0.85);
         --panel-solid: #ffffff;
+        --card-bg: rgba(255, 255, 255, 0.6);
         --ink: #171717;
         --muted: #626262;
         --line: rgba(0, 0, 0, 0.1);
@@ -16,25 +19,62 @@
         --accent-soft: rgba(15, 118, 110, 0.12);
         --danger: #b91c1c;
         --warn: #b45309;
+        --pill-bg: rgba(0, 0, 0, 0.06);
+        --tab-bg: rgba(255, 255, 255, 0.65);
+        --tab-active-bg: #ffffff;
+        --tab-active-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+        --btn-secondary: rgba(0, 0, 0, 0.06);
+        --detail-bg: rgba(255, 255, 255, 0.45);
+        --bar-bg: rgba(0, 0, 0, 0.08);
         --shadow: 0 16px 48px rgba(0, 0, 0, 0.08);
         --radius: 18px;
         --radius-sm: 12px;
+        --transition: 0.2s ease;
+        color-scheme: light;
+      }
+
+      html.dark {
+        --bg: #0f0f0f;
+        --bg-grad-1: rgba(15, 118, 110, 0.15);
+        --bg-grad-2: rgba(180, 83, 9, 0.1);
+        --panel: rgba(28, 28, 30, 0.9);
+        --panel-solid: #1c1c1e;
+        --card-bg: rgba(44, 44, 46, 0.6);
+        --ink: #e5e5e5;
+        --muted: #9a9a9a;
+        --line: rgba(255, 255, 255, 0.1);
+        --accent: #2dd4bf;
+        --accent-soft: rgba(45, 212, 191, 0.12);
+        --danger: #f87171;
+        --warn: #fbbf24;
+        --pill-bg: rgba(255, 255, 255, 0.08);
+        --tab-bg: rgba(255, 255, 255, 0.06);
+        --tab-active-bg: rgba(255, 255, 255, 0.14);
+        --tab-active-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+        --btn-secondary: rgba(255, 255, 255, 0.1);
+        --detail-bg: rgba(255, 255, 255, 0.05);
+        --bar-bg: rgba(255, 255, 255, 0.1);
+        --shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+        color-scheme: dark;
       }
 
       * { box-sizing: border-box; }
       html, body { min-height: 100%; margin: 0; }
+
       body {
-        font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
         color: var(--ink);
         background:
-          radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 28%),
-          radial-gradient(circle at bottom right, rgba(180, 83, 9, 0.12), transparent 30%),
+          radial-gradient(circle at top left, var(--bg-grad-1), transparent 28%),
+          radial-gradient(circle at bottom right, var(--bg-grad-2), transparent 30%),
           var(--bg);
+        transition: background var(--transition), color var(--transition);
       }
 
       .page {
         min-height: 100vh;
-        width: 100%;
         padding: 28px 18px 56px;
       }
 
@@ -43,128 +83,213 @@
         margin: 0 auto;
       }
 
+      /* ── Hero ── */
       .hero {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
         gap: 16px;
-        margin-bottom: 20px;
+        margin-bottom: 24px;
       }
 
       h1 {
         margin: 0;
-        font-size: 32px;
-        letter-spacing: -0.04em;
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
       }
 
       .subtitle {
-        margin-top: 8px;
+        margin-top: 6px;
         color: var(--muted);
-        font-size: 13px;
+        font-size: 12px;
       }
 
-      .lang {
+      .hero-right {
         display: flex;
-        gap: 6px;
+        gap: 8px;
+        align-items: center;
+        flex-shrink: 0;
       }
 
-      .lang button,
-      .tab,
-      button {
+      /* ── Switcher pills ── */
+      .switcher {
+        display: inline-flex;
+        gap: 2px;
+        padding: 3px;
+        border-radius: 10px;
+        background: var(--tab-bg);
+      }
+
+      .switcher button {
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 500;
         border: 0;
-        border-radius: var(--radius-sm);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--muted);
         cursor: pointer;
+        transition: all var(--transition);
         font: inherit;
+        font-size: 12px;
+        line-height: 1.4;
       }
 
-      .lang button {
-        padding: 8px 12px;
-        background: rgba(255, 255, 255, 0.55);
+      .switcher button.active {
+        background: var(--tab-active-bg);
+        color: var(--ink);
+        box-shadow: var(--tab-active-shadow);
       }
 
-      .lang button.active {
-        background: var(--ink);
-        color: white;
+      .theme-btn {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        border-radius: 10px;
+        background: var(--tab-bg);
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 16px;
+        transition: all var(--transition);
       }
 
+      .theme-btn:hover { background: var(--btn-secondary); }
+
+      /* ── Card ── */
       .card {
         background: var(--panel);
         backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
         border: 1px solid var(--line);
         border-radius: var(--radius);
         box-shadow: var(--shadow);
         padding: 22px;
+        transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
       }
 
       .stack { display: grid; gap: 16px; }
       .hidden { display: none !important; }
 
+      /* ── Tabs ── */
       .tabs {
         display: inline-flex;
-        gap: 4px;
-        padding: 4px;
+        gap: 2px;
+        padding: 3px;
         border-radius: 14px;
-        background: rgba(255, 255, 255, 0.65);
-        margin-bottom: 18px;
+        background: var(--tab-bg);
       }
 
       .tab {
+        border: 0;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font: inherit;
         background: transparent;
         color: var(--muted);
-        padding: 9px 16px;
+        padding: 9px 18px;
+        font-size: 13px;
+        font-weight: 500;
+        transition: all var(--transition);
       }
+
+      .tab:hover { color: var(--ink); }
 
       .tab.active {
-        background: var(--panel-solid);
+        background: var(--tab-active-bg);
         color: var(--ink);
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+        box-shadow: var(--tab-active-shadow);
       }
 
+      /* ── Nav bar ── */
+      .nav-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+      }
+
+      .nav-bar .toolbar-actions {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+      }
+
+      /* ── Input / Textarea ── */
       input, textarea {
         width: 100%;
         border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 12px 14px;
+        border-radius: var(--radius-sm);
+        padding: 10px 14px;
         background: var(--panel-solid);
+        color: var(--ink);
         font: inherit;
+        font-size: 14px;
+        outline: none;
+        transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
       }
 
+      input:focus, textarea:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.6; }
+
       textarea {
-        min-height: 120px;
+        min-height: 100px;
         resize: vertical;
-        font-family: "SF Mono", "Cascadia Code", monospace;
+        font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
         font-size: 13px;
       }
 
+      /* ── Buttons ── */
       button {
-        padding: 10px 14px;
+        border: 0;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font: inherit;
+        padding: 9px 16px;
+        font-size: 13px;
+        font-weight: 500;
         background: var(--accent);
         color: white;
+        transition: all var(--transition);
       }
 
+      button:hover { opacity: 0.88; }
+      button:active { transform: scale(0.97); }
+
       button.secondary {
-        background: rgba(0, 0, 0, 0.06);
+        background: var(--btn-secondary);
         color: var(--ink);
       }
 
-      button.danger {
-        background: var(--danger);
-      }
+      button.secondary:hover { opacity: 1; background: var(--line); }
 
-      .toolbar,
-      .row {
+      button.danger { background: var(--danger); color: white; }
+
+      .toolbar, .row {
         display: flex;
-        gap: 10px;
+        gap: 8px;
         flex-wrap: wrap;
         align-items: center;
       }
 
+      /* ── Status banner ── */
       .status {
-        padding: 12px 14px;
-        border-radius: 12px;
+        padding: 10px 14px;
+        border-radius: var(--radius-sm);
         background: var(--accent-soft);
         color: var(--accent);
+        font-size: 13px;
         white-space: pre-wrap;
+        transition: background var(--transition), color var(--transition);
       }
 
       .status.error {
@@ -172,80 +297,87 @@
         color: var(--danger);
       }
 
-      .grid {
-        display: grid;
-        gap: 14px;
-      }
+      .grid { display: grid; gap: 12px; }
 
+      /* ── Credential card ── */
       .credential {
         border: 1px solid var(--line);
-        border-radius: 16px;
-        background: rgba(255, 255, 255, 0.6);
+        border-radius: 14px;
+        background: var(--card-bg);
         padding: 16px;
         display: grid;
-        gap: 14px;
+        gap: 12px;
+        transition: background var(--transition), border-color var(--transition);
       }
 
       .credential-head {
         display: flex;
         justify-content: space-between;
         gap: 10px;
-        align-items: center;
+        align-items: flex-start;
         flex-wrap: wrap;
       }
 
       .credential-title {
-        font-size: 16px;
-        font-weight: 700;
+        font-size: 15px;
+        font-weight: 600;
+        word-break: break-all;
       }
 
       .meta {
         display: flex;
-        gap: 8px;
+        gap: 6px;
         flex-wrap: wrap;
+        margin-top: 6px;
       }
 
       .pill {
         border-radius: 999px;
-        padding: 4px 10px;
-        font-size: 12px;
-        background: rgba(0, 0, 0, 0.06);
+        padding: 3px 10px;
+        font-size: 11px;
+        font-weight: 500;
+        background: var(--pill-bg);
         color: var(--muted);
+        white-space: nowrap;
       }
 
-      .pill.healthy { background: rgba(15, 118, 110, 0.12); color: var(--accent); }
+      .pill.healthy { background: var(--accent-soft); color: var(--accent); }
       .pill.warn { background: rgba(180, 83, 9, 0.12); color: var(--warn); }
       .pill.dead { background: rgba(185, 28, 28, 0.12); color: var(--danger); }
 
+      /* ── Details ── */
       details {
         border: 1px solid var(--line);
-        border-radius: 14px;
-        background: rgba(255, 255, 255, 0.45);
-        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        background: var(--detail-bg);
+        padding: 10px 14px;
+        transition: background var(--transition), border-color var(--transition);
       }
 
       summary {
         cursor: pointer;
         color: var(--muted);
+        font-size: 13px;
+        user-select: none;
+        list-style: none;
       }
 
+      summary::-webkit-details-marker { display: none; }
+      summary::before { content: "\25B8\00a0"; font-size: 10px; display: inline-block; transition: transform var(--transition); }
+      details[open] summary::before { transform: rotate(90deg); }
+
       pre {
-        margin: 12px 0 0;
+        margin: 10px 0 0;
         white-space: pre-wrap;
         word-break: break-word;
         font-family: "SF Mono", "Cascadia Code", monospace;
         font-size: 12px;
+        line-height: 1.6;
       }
 
-      .usage-list {
-        display: grid;
-        gap: 10px;
-      }
-
-      .usage-item {
-        display: grid;
-        gap: 6px;
-      }
+      /* ── Usage bars ── */
+      .usage-list { display: grid; gap: 10px; }
+      .usage-item { display: grid; gap: 4px; }
 
       .usage-label {
         display: flex;
@@ -253,30 +385,60 @@
         gap: 12px;
         color: var(--muted);
         font-size: 12px;
+        font-weight: 500;
       }
 
       .bar {
-        height: 10px;
+        height: 8px;
         border-radius: 999px;
         overflow: hidden;
-        background: rgba(0, 0, 0, 0.08);
+        background: var(--bar-bg);
       }
 
       .fill {
         height: 100%;
         border-radius: inherit;
         background: linear-gradient(90deg, #0f766e, #14b8a6);
+        transition: width 0.4s ease;
       }
 
       .usage-note {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--muted);
       }
 
-      @media (max-width: 720px) {
-        .page { padding: 18px 12px 32px; }
-        .hero { flex-direction: column; }
+      /* ── Section title ── */
+      .section-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0;
       }
+
+      /* ── Login center ── */
+      .login-wrap {
+        max-width: 420px;
+        margin: 48px auto 0;
+      }
+
+      /* ── Responsive ── */
+      @media (max-width: 720px) {
+        .page { padding: 16px 12px 32px; }
+        .hero { flex-direction: column; }
+        .hero-right { width: 100%; justify-content: flex-start; }
+        .nav-bar .toolbar-actions { margin-left: 0; width: 100%; }
+        .credential-head { flex-direction: column; align-items: stretch; }
+        .credential-head .row { justify-content: flex-start; }
+        .tabs { width: 100%; }
+        .tab { flex: 1; text-align: center; padding: 9px 10px; font-size: 12px; }
+      }
+
+      /* ── Animation ── */
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      .card { animation: fadeIn 0.25s ease-out; }
     </style>
   </head>
   <body>
@@ -287,58 +449,72 @@
             <h1>sgproxy</h1>
             <div class="subtitle">LeenHawk &lt;leenhawk@leenhawk.com&gt;</div>
           </div>
-          <div class="lang">
-            <button id="langZh" class="active">中文</button>
-            <button id="langEn">EN</button>
+          <div class="hero-right">
+            <div class="switcher">
+              <button id="langZh" class="active">中文</button>
+              <button id="langEn">EN</button>
+            </div>
+            <button class="theme-btn" id="themeToggle" title="Toggle theme">
+              <span id="themeIcon">&#9790;</span>
+            </button>
           </div>
         </div>
 
+        <!-- Usage (public) page -->
         <div id="usagePage" class="card stack hidden">
           <div id="publicStatus" class="status">Loading...</div>
           <div id="publicList" class="grid"></div>
         </div>
 
-        <div id="loginPage" class="card stack hidden">
-          <div id="loginTitle" style="font-size:20px;font-weight:700;">登录</div>
-          <input id="tokenInput" placeholder="Bearer token" />
-          <div class="row">
-            <button id="loginBtn">登录</button>
-            <button id="clearBtn" class="secondary">清空</button>
+        <!-- Login page -->
+        <div id="loginPage" class="login-wrap hidden">
+          <div class="card stack">
+            <div class="section-title" id="loginTitle"></div>
+            <input id="tokenInput" placeholder="Bearer token" />
+            <div class="row">
+              <button id="loginBtn"></button>
+              <button id="clearBtn" class="secondary"></button>
+            </div>
+            <div id="loginStatus" class="status"></div>
           </div>
-          <div id="loginStatus" class="status">输入 ADMIN_TOKEN。</div>
         </div>
 
+        <!-- Admin page -->
         <div id="adminPage" class="hidden">
-          <div class="tabs">
-            <button class="tab" data-tab="oauth" id="oauthTab">OAuth</button>
-            <button class="tab active" data-tab="credentials" id="credentialsTab">凭证</button>
+          <div class="nav-bar">
+            <div class="tabs">
+              <button class="tab active" id="credentialsTab"></button>
+              <button class="tab" id="oauthTab">OAuth</button>
+            </div>
+            <div class="toolbar-actions">
+              <button id="refreshBtn" class="secondary"></button>
+              <button id="logoutBtn" class="secondary"></button>
+            </div>
           </div>
 
-          <div id="globalStatus" class="status hidden"></div>
+          <div id="globalStatus" class="status hidden" style="margin-bottom:14px"></div>
 
+          <!-- Credentials panel -->
           <div id="credentialsPanel" class="card stack">
-            <div class="toolbar">
-              <button id="refreshBtn" class="secondary">刷新</button>
-              <button id="logoutBtn" class="secondary">退出</button>
-            </div>
             <div class="stack">
-              <div style="font-size:16px;font-weight:700;" id="importTitle">导入凭证 JSON</div>
-              <textarea id="importInput" placeholder="{&quot;access_token&quot;:&quot;...&quot;}"></textarea>
+              <div class="section-title" id="importTitle"></div>
+              <textarea id="importInput" placeholder='{"access_token":"..."}'></textarea>
               <div class="row">
-                <button id="importBtn">导入</button>
+                <button id="importBtn"></button>
               </div>
             </div>
             <div id="credentialList" class="grid"></div>
           </div>
 
+          <!-- OAuth panel -->
           <div id="oauthPanel" class="card stack hidden">
-            <div style="font-size:16px;font-weight:700;" id="oauthTitle">OAuth 导入</div>
+            <div class="section-title" id="oauthTitle"></div>
             <div class="row">
-              <button id="oauthStartBtn">打开授权页</button>
+              <button id="oauthStartBtn"></button>
             </div>
-            <textarea id="oauthCallbackInput" placeholder="粘贴 callback URL 或 code"></textarea>
+            <textarea id="oauthCallbackInput"></textarea>
             <div class="row">
-              <button id="oauthCallbackBtn">完成导入</button>
+              <button id="oauthCallbackBtn"></button>
             </div>
           </div>
         </div>
@@ -349,8 +525,30 @@
       const MODE = "__SGPROXY_VIEW_MODE__";
       const TOKEN_KEY = "sgproxy_admin_token";
       const LANG_KEY = "sgproxy_lang";
+      const THEME_KEY = "sgproxy_theme";
       let lang = localStorage.getItem(LANG_KEY) || "zh";
 
+      /* ── Theme ── */
+      function getPreferredTheme() {
+        const stored = localStorage.getItem(THEME_KEY);
+        if (stored === "dark" || stored === "light") return stored;
+        return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+
+      function applyTheme(theme) {
+        document.documentElement.classList.toggle("dark", theme === "dark");
+        document.getElementById("themeIcon").textContent = theme === "dark" ? "\u2600" : "\u263E";
+        localStorage.setItem(THEME_KEY, theme);
+      }
+
+      applyTheme(getPreferredTheme());
+
+      document.getElementById("themeToggle").addEventListener("click", () => {
+        const next = document.documentElement.classList.contains("dark") ? "light" : "dark";
+        applyTheme(next);
+      });
+
+      /* ── I18N ── */
       const I18N = {
         zh: {
           login: "登录",
@@ -365,6 +563,7 @@
           oauthTitle: "OAuth 导入",
           oauthOpen: "打开授权页",
           oauthFinish: "完成导入",
+          oauthPlaceholder: "粘贴 callback URL 或 code",
           enabled: "已启用",
           disabled: "已停用",
           copy: "复制",
@@ -400,6 +599,7 @@
           oauthTitle: "OAuth Import",
           oauthOpen: "Open Auth Page",
           oauthFinish: "Complete Import",
+          oauthPlaceholder: "Paste callback URL or code",
           enabled: "Enabled",
           disabled: "Disabled",
           copy: "Copy",
@@ -424,6 +624,7 @@
         }
       };
 
+      /* ── DOM refs ── */
       const els = {
         loginPage: document.getElementById("loginPage"),
         adminPage: document.getElementById("adminPage"),
@@ -454,6 +655,7 @@
         langEn: document.getElementById("langEn")
       };
 
+      /* ── Helpers ── */
       function t(key) {
         return (I18N[lang] && I18N[lang][key]) || key;
       }
@@ -490,6 +692,7 @@
         return data;
       }
 
+      /* ── Usage rendering ── */
       function usageRows(usage) {
         const buckets = [
           ["five_hour", "5h"],
@@ -570,6 +773,7 @@
           .replaceAll(">", "&gt;");
       }
 
+      /* ── Data loading ── */
       async function loadCredentials() {
         const [credentials, usage] = await Promise.all([
           api("/api/credentials"),
@@ -603,6 +807,7 @@
         setStatus(els.publicStatus, t("publicReady"));
       }
 
+      /* ── Auth ── */
       async function login() {
         localStorage.setItem(TOKEN_KEY, els.tokenInput.value.trim());
         try {
@@ -631,6 +836,7 @@
         els.adminPage.classList.remove("hidden");
       }
 
+      /* ── Tab switching ── */
       function setTab(tab) {
         const isCredentials = tab === "credentials";
         els.credentialsTab.classList.toggle("active", isCredentials);
@@ -648,6 +854,7 @@
         }
       }
 
+      /* ── Language ── */
       function applyLanguage() {
         localStorage.setItem(LANG_KEY, lang);
         els.langZh.classList.toggle("active", lang === "zh");
@@ -665,8 +872,10 @@
         els.oauthTitle.textContent = t("oauthTitle");
         els.oauthStartBtn.textContent = t("oauthOpen");
         els.oauthCallbackBtn.textContent = t("oauthFinish");
+        els.oauthCallbackInput.placeholder = t("oauthPlaceholder");
       }
 
+      /* ── Event listeners ── */
       els.langZh.addEventListener("click", async () => {
         lang = "zh";
         applyLanguage();
@@ -764,6 +973,7 @@
         }
       }
 
+      /* ── Boot ── */
       async function boot() {
         applyLanguage();
         if (MODE === "usage") {
