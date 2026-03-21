@@ -29,6 +29,10 @@
 
 ## 快速开始
 
+看上面的 Cloudflare 按钮
+
+## 开发
+
 ### 前置要求
 
 - [Rust](https://rustup.rs/) 工具链

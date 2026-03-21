@@ -29,6 +29,10 @@ A ClaudeCode credential gateway built on Cloudflare Workers + Durable Objects, w
 
 ## Quick Start
 
+Look at Cloudflare button.
+
+## Development
+
 ### Prerequisites
 
 - [Rust](https://rustup.rs/) toolchain
