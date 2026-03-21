@@ -1,12 +1,12 @@
 use anyhow::{Result, anyhow};
 use js_sys::Date;
-use rand::RngCore as _;
+use rand::Rng as _;
 use worker::Storage;
 
 use crate::config::{
-    CredentialConfig, CredentialStatus, CredentialUpsertInput, CredentialUsageSnapshot,
-    DurableStateDoc, FIVE_HOUR_WINDOW_MS, SEVEN_DAY_WINDOW_MS, STORAGE_KEY, StoredOAuthState,
-    UsageCredentialView, clean_opt_owned,
+    ChannelKind, CredentialConfig, CredentialStatus, CredentialUpsertInput,
+    CredentialUsageSnapshot, DurableStateDoc, FIVE_HOUR_WINDOW_MS, SEVEN_DAY_WINDOW_MS,
+    STORAGE_KEY, StoredOAuthState, UsageCredentialView, clean_opt_owned,
 };
 
 pub async fn load_doc(storage: &Storage) -> Result<DurableStateDoc> {
@@ -38,18 +38,24 @@ pub fn generate_credential_id() -> String {
     out
 }
 
-pub fn next_order(credentials: &[CredentialConfig]) -> u32 {
+pub fn next_order(credentials: &[CredentialConfig], channel: ChannelKind) -> u32 {
     credentials
         .iter()
+        .filter(|item| item.channel == channel)
         .map(|item| item.order)
         .max()
         .unwrap_or(0)
         .saturating_add(1)
 }
 
-pub fn first_usable(credentials: &[CredentialConfig], now: u64) -> Option<CredentialConfig> {
+pub fn first_usable(
+    credentials: &[CredentialConfig],
+    channel: ChannelKind,
+    now: u64,
+) -> Option<CredentialConfig> {
     credentials
         .iter()
+        .filter(|item| item.channel == channel)
         .filter(|item| item.enabled)
         .filter(|item| !matches!(item.status, CredentialStatus::Dead))
         .filter(|item| item.cooldown_until_unix_ms.is_none_or(|until| until <= now))
@@ -61,16 +67,21 @@ pub fn upsert_credential(
     doc: &mut DurableStateDoc,
     input: CredentialUpsertInput,
     forced_id: Option<&str>,
+    forced_channel: ChannelKind,
 ) -> CredentialConfig {
     let id = forced_id
         .map(ToString::to_string)
         .or(input.id.clone())
         .unwrap_or_else(generate_credential_id);
-    let order = input.order.unwrap_or_else(|| next_order(&doc.credentials));
+    let channel = input.channel.unwrap_or(forced_channel);
+    let order = input
+        .order
+        .unwrap_or_else(|| next_order(&doc.credentials, channel));
     let current = doc.credentials.iter().find(|item| item.id == id).cloned();
 
     let mut credential = CredentialConfig {
         id: id.clone(),
+        channel,
         enabled: input
             .enabled
             .unwrap_or(current.as_ref().map(|item| item.enabled).unwrap_or(true)),
@@ -79,6 +90,7 @@ pub fn upsert_credential(
         refresh_token: input.refresh_token.unwrap_or_default(),
         expires_at_unix_ms: input.expires_at_unix_ms.unwrap_or(0),
         user_email: clean_opt_owned(input.user_email),
+        account_id: clean_opt_owned(input.account_id),
         organization_uuid: clean_opt_owned(input.organization_uuid),
         subscription_type: clean_opt_owned(input.subscription_type),
         rate_limit_tier: clean_opt_owned(input.rate_limit_tier),
@@ -155,12 +167,14 @@ pub fn record_rate_limited(
     now: u64,
     usage: Option<&CredentialUsageSnapshot>,
     usage_error: Option<String>,
+    is_codex_review: bool,
 ) {
     if let Some(item) = doc.credentials.iter_mut().find(|item| item.id == id) {
         item.last_used_at_unix_ms = Some(now);
         item.last_error =
             Some(usage_error.unwrap_or_else(|| "upstream returned status 429".to_string()));
-        let (status, cooldown_until_unix_ms) = derive_rate_limited_status(usage, now);
+        let (status, cooldown_until_unix_ms) =
+            derive_rate_limited_status(usage, now, is_codex_review);
         item.status = status;
         item.cooldown_until_unix_ms = cooldown_until_unix_ms;
     }
@@ -194,6 +208,7 @@ pub fn build_usage_view(
         merge_status_for_view(credential, &usage, now);
     UsageCredentialView {
         id: credential.id.clone(),
+        channel: credential.channel,
         user_email: credential.user_email.clone(),
         enabled: credential.enabled,
         order: credential.order,
@@ -207,12 +222,13 @@ pub fn build_usage_view(
 
 pub fn insert_oauth_state(doc: &mut DurableStateDoc, state: StoredOAuthState) {
     doc.oauth_states
-        .retain(|item| item.state_id != state.state_id);
+        .retain(|item| !(item.channel == state.channel && item.state_id == state.state_id));
     doc.oauth_states.push(state);
 }
 
 pub fn take_oauth_state(
     doc: &mut DurableStateDoc,
+    channel: ChannelKind,
     requested_state: Option<&str>,
 ) -> Result<StoredOAuthState> {
     let now = now_unix_ms();
@@ -222,24 +238,38 @@ pub fn take_oauth_state(
         let index = doc
             .oauth_states
             .iter()
-            .position(|item| item.state_id == state_id)
+            .position(|item| item.channel == channel && item.state_id == state_id)
             .ok_or_else(|| anyhow!("missing state"))?;
         return Ok(doc.oauth_states.remove(index));
     }
 
-    if doc.oauth_states.is_empty() {
+    let matching = doc
+        .oauth_states
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item.channel == channel)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if matching.is_empty() {
         return Err(anyhow!("missing state"));
     }
-    if doc.oauth_states.len() > 1 {
+    if matching.len() > 1 {
         return Err(anyhow!("ambiguous_state"));
     }
-    Ok(doc.oauth_states.remove(0))
+    Ok(doc.oauth_states.remove(matching[0]))
 }
 
 fn derive_rate_limited_status(
     usage: Option<&CredentialUsageSnapshot>,
     now: u64,
+    is_codex_review: bool,
 ) -> (CredentialStatus, Option<u64>) {
+    if is_codex_review {
+        return (
+            CredentialStatus::CodexReviewLimit,
+            review_limit_until(usage, now),
+        );
+    }
     exact_usage_status(usage.unwrap_or(&CredentialUsageSnapshot::default()), now).unwrap_or((
         CredentialStatus::Cooldown5h,
         Some(now.saturating_add(FIVE_HOUR_WINDOW_MS)),
@@ -250,6 +280,30 @@ fn exact_usage_status(
     usage: &CredentialUsageSnapshot,
     now: u64,
 ) -> Option<(CredentialStatus, Option<u64>)> {
+    if let Some(codex) = usage.codex.as_ref() {
+        if codex
+            .secondary
+            .used_percent
+            .is_some_and(|value| value >= 100)
+        {
+            return Some((
+                CredentialStatus::CodexSecondaryLimit,
+                bucket_reset_or(
+                    &codex.secondary.resets_at,
+                    now.saturating_add(SEVEN_DAY_WINDOW_MS),
+                ),
+            ));
+        }
+        if codex.primary.used_percent.is_some_and(|value| value >= 100) {
+            return Some((
+                CredentialStatus::CodexPrimaryLimit,
+                bucket_reset_or(
+                    &codex.primary.resets_at,
+                    now.saturating_add(FIVE_HOUR_WINDOW_MS),
+                ),
+            ));
+        }
+    }
     if usage.seven_day.utilization_pct == Some(100) {
         return Some((
             CredentialStatus::Cooldown7d,
@@ -278,6 +332,20 @@ fn exact_usage_status(
         ));
     }
     None
+}
+
+fn review_limit_until(usage: Option<&CredentialUsageSnapshot>, now: u64) -> Option<u64> {
+    if let Some(usage) = usage {
+        if let Some(codex) = usage.codex.as_ref()
+            && let Some(until) = parse_unix_ms(codex.primary.resets_at.as_deref())
+        {
+            return Some(until);
+        }
+        if let Some(until) = parse_unix_ms(usage.five_hour.resets_at.as_deref()) {
+            return Some(until);
+        }
+    }
+    Some(now.saturating_add(FIVE_HOUR_WINDOW_MS))
 }
 
 fn bucket_reset_or(resets_at: &Option<String>, fallback: u64) -> Option<u64> {

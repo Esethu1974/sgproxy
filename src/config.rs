@@ -10,6 +10,14 @@ pub const DEFAULT_USER_AGENT: &str = "claude-code/2.1.76";
 pub const DEFAULT_TOKEN_USER_AGENT: &str = "claude-cli/2.1.76 (external, cli)";
 pub const CLAUDE_CODE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 pub const CLAUDE_CODE_OAUTH_SCOPE: &str = "user:profile user:inference user:sessions:claude_code";
+pub const DEFAULT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+pub const DEFAULT_CODEX_ISSUER: &str = "https://auth.openai.com";
+pub const DEFAULT_CODEX_REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
+pub const DEFAULT_CODEX_SCOPE: &str = "openid profile email offline_access";
+pub const DEFAULT_CODEX_ORIGINATOR: &str = "codex_vscode";
+pub const DEFAULT_CODEX_USER_AGENT: &str = "codex_vscode/0.110.0";
+pub const DEFAULT_CODEX_CLIENT_VERSION: &str = "0.110.0";
+pub const CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub const OAUTH_STATE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const FIVE_HOUR_WINDOW_MS: u64 = 5 * 60 * 60 * 1000;
 pub const SEVEN_DAY_WINDOW_MS: u64 = 7 * 24 * 60 * 60 * 1000;
@@ -26,15 +34,21 @@ pub struct DurableStateDoc {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredOAuthState {
+    #[serde(default)]
+    pub channel: ChannelKind,
     pub state_id: String,
     pub code_verifier: String,
     pub redirect_uri: String,
+    #[serde(default)]
+    pub oauth_issuer: Option<String>,
     pub created_at_unix_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CredentialConfig {
     pub id: String,
+    #[serde(default)]
+    pub channel: ChannelKind,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default)]
@@ -47,6 +61,8 @@ pub struct CredentialConfig {
     pub expires_at_unix_ms: u64,
     #[serde(default)]
     pub user_email: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
     #[serde(default)]
     pub organization_uuid: Option<String>,
     #[serde(default)]
@@ -65,12 +81,23 @@ pub struct CredentialConfig {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum ChannelKind {
+    #[default]
+    ClaudeCode,
+    Codex,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum CredentialStatus {
     #[default]
     Healthy,
     Cooldown5h,
     Cooldown7d,
     CooldownSonnet7d,
+    CodexReviewLimit,
+    CodexPrimaryLimit,
+    CodexSecondaryLimit,
     Dead,
 }
 
@@ -83,6 +110,8 @@ pub struct CredentialUsageSnapshot {
     #[serde(default)]
     pub seven_day_sonnet: CredentialUsageBucket,
     #[serde(default)]
+    pub codex: Option<CodexUsageSnapshot>,
+    #[serde(default)]
     pub last_error: Option<String>,
 }
 
@@ -94,9 +123,36 @@ pub struct CredentialUsageBucket {
     pub resets_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CodexUsageSnapshot {
+    #[serde(default)]
+    pub primary: CodexUsageWindow,
+    #[serde(default)]
+    pub secondary: CodexUsageWindow,
+    #[serde(default)]
+    pub plan_type: Option<String>,
+    #[serde(default)]
+    pub credits_balance: Option<f64>,
+    #[serde(default)]
+    pub credits_unlimited: Option<bool>,
+    #[serde(default)]
+    pub has_credits: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CodexUsageWindow {
+    #[serde(default)]
+    pub used_percent: Option<u32>,
+    #[serde(default)]
+    pub window_duration_mins: Option<u32>,
+    #[serde(default)]
+    pub resets_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageCredentialView {
     pub id: String,
+    pub channel: ChannelKind,
     pub user_email: Option<String>,
     pub enabled: bool,
     pub order: u32,
@@ -112,6 +168,8 @@ pub struct CredentialUpsertInput {
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
+    pub channel: Option<ChannelKind>,
+    #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
     pub order: Option<u32>,
@@ -120,9 +178,13 @@ pub struct CredentialUpsertInput {
     #[serde(default)]
     pub refresh_token: Option<String>,
     #[serde(default)]
+    pub id_token: Option<String>,
+    #[serde(default)]
     pub expires_at_unix_ms: Option<u64>,
     #[serde(default)]
     pub user_email: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
     #[serde(default)]
     pub organization_uuid: Option<String>,
     #[serde(default)]
@@ -133,10 +195,12 @@ pub struct CredentialUpsertInput {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CredentialJsonView {
+    pub channel: ChannelKind,
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at_unix_ms: u64,
     pub user_email: Option<String>,
+    pub account_id: Option<String>,
     pub organization_uuid: Option<String>,
     pub subscription_type: Option<String>,
     pub rate_limit_tier: Option<String>,
@@ -165,6 +229,7 @@ impl DurableStateDoc {
             credential.access_token = credential.access_token.trim().to_string();
             credential.refresh_token = credential.refresh_token.trim().to_string();
             credential.user_email = clean_opt_owned(credential.user_email.take());
+            credential.account_id = clean_opt_owned(credential.account_id.take());
             credential.organization_uuid = clean_opt_owned(credential.organization_uuid.take());
             credential.subscription_type = clean_opt_owned(credential.subscription_type.take());
             credential.rate_limit_tier = clean_opt_owned(credential.rate_limit_tier.take());
@@ -174,6 +239,9 @@ impl DurableStateDoc {
                 CredentialStatus::Cooldown5h
                     | CredentialStatus::Cooldown7d
                     | CredentialStatus::CooldownSonnet7d
+                    | CredentialStatus::CodexReviewLimit
+                    | CredentialStatus::CodexPrimaryLimit
+                    | CredentialStatus::CodexSecondaryLimit
             ) && credential
                 .cooldown_until_unix_ms
                 .is_some_and(|until| until <= now)
@@ -190,10 +258,12 @@ impl DurableStateDoc {
 impl CredentialConfig {
     pub fn json_view(&self) -> CredentialJsonView {
         CredentialJsonView {
+            channel: self.channel,
             access_token: self.access_token.clone(),
             refresh_token: self.refresh_token.clone(),
             expires_at_unix_ms: self.expires_at_unix_ms,
             user_email: self.user_email.clone(),
+            account_id: self.account_id.clone(),
             organization_uuid: self.organization_uuid.clone(),
             subscription_type: self.subscription_type.clone(),
             rate_limit_tier: self.rate_limit_tier.clone(),

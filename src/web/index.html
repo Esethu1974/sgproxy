@@ -310,8 +310,13 @@
 
         <div id="adminPage" class="hidden">
           <div class="tabs">
-            <button class="tab active" data-tab="credentials" id="credentialsTab">凭证</button>
+            <button class="tab active" data-channel="claudecode" id="channelClaudeTab">ClaudeCode</button>
+            <button class="tab" data-channel="codex" id="channelCodexTab">Codex</button>
+          </div>
+
+          <div class="tabs">
             <button class="tab" data-tab="oauth" id="oauthTab">OAuth</button>
+            <button class="tab active" data-tab="credentials" id="credentialsTab">凭证</button>
           </div>
 
           <div id="globalStatus" class="status hidden"></div>
@@ -349,7 +354,9 @@
       const MODE = "__SGPROXY_VIEW_MODE__";
       const TOKEN_KEY = "sgproxy_admin_token";
       const LANG_KEY = "sgproxy_lang";
+      const CHANNEL_KEY = "sgproxy_channel";
       let lang = localStorage.getItem(LANG_KEY) || "zh";
+      let currentChannel = localStorage.getItem(CHANNEL_KEY) || "claudecode";
 
       const I18N = {
         zh: {
@@ -380,7 +387,23 @@
           unauthorized: "未授权",
           noCredentials: "暂无凭证",
           lastError: "错误",
-          orderPrefix: "顺序"
+          orderPrefix: "顺序",
+          claudecodeImportTitle: "导入 ClaudeCode 凭证 JSON",
+          codexImportTitle: "导入 Codex 凭证 JSON",
+          claudecodeOauthTitle: "ClaudeCode OAuth 导入",
+          codexOauthTitle: "Codex OAuth 导入",
+          statusHealthy: "健康",
+          statusCooldown5h: "五小时冷却",
+          statusCooldown7d: "七天冷却",
+          statusCooldownSonnet7d: "七天 Sonnet 冷却",
+          statusCodexReviewLimit: "Code Review 限制",
+          statusCodexPrimaryLimit: "一级限制",
+          statusCodexSecondaryLimit: "二级限制",
+          statusDead: "死亡",
+          codexPlan: "套餐",
+          codexCredits: "额度",
+          codexPrimary: "一级限额",
+          codexSecondary: "二级限额"
         },
         en: {
           login: "Login",
@@ -410,7 +433,23 @@
           unauthorized: "Unauthorized",
           noCredentials: "No credentials",
           lastError: "Error",
-          orderPrefix: "Order"
+          orderPrefix: "Order",
+          claudecodeImportTitle: "Import ClaudeCode Credential JSON",
+          codexImportTitle: "Import Codex Credential JSON",
+          claudecodeOauthTitle: "ClaudeCode OAuth Import",
+          codexOauthTitle: "Codex OAuth Import",
+          statusHealthy: "Healthy",
+          statusCooldown5h: "5h Cooldown",
+          statusCooldown7d: "7d Cooldown",
+          statusCooldownSonnet7d: "7d Sonnet Cooldown",
+          statusCodexReviewLimit: "Code Review Limited",
+          statusCodexPrimaryLimit: "Primary Limited",
+          statusCodexSecondaryLimit: "Secondary Limited",
+          statusDead: "Dead",
+          codexPlan: "Plan",
+          codexCredits: "Credits",
+          codexPrimary: "Primary Limit",
+          codexSecondary: "Secondary Limit"
         }
       };
 
@@ -435,6 +474,8 @@
         oauthCallbackBtn: document.getElementById("oauthCallbackBtn"),
         credentialsTab: document.getElementById("credentialsTab"),
         oauthTab: document.getElementById("oauthTab"),
+        channelClaudeTab: document.getElementById("channelClaudeTab"),
+        channelCodexTab: document.getElementById("channelCodexTab"),
         credentialsPanel: document.getElementById("credentialsPanel"),
         oauthPanel: document.getElementById("oauthPanel"),
         globalStatus: document.getElementById("globalStatus"),
@@ -446,6 +487,17 @@
 
       function t(key) {
         return (I18N[lang] && I18N[lang][key]) || key;
+      }
+
+      function apiBase() {
+        return `/api/${currentChannel}`;
+      }
+
+      function escapeHtml(input) {
+        return String(input)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
       }
 
       function setStatus(target, message, isError = false) {
@@ -503,25 +555,118 @@
         }).join("");
       }
 
+      function codexUsageRows(usage) {
+        const codex = usage && usage.codex ? usage.codex : {};
+        const buckets = [
+          ["primary", t("codexPrimary")],
+          ["secondary", t("codexSecondary")]
+        ];
+        const rows = buckets.map(([key, label]) => {
+          const item = codex[key] || {};
+          const pct = Number(item.used_percent || 0);
+          const mins = item.window_duration_mins ? `${item.window_duration_mins}m` : "-";
+          const reset = item.resets_at || "-";
+          return `
+            <div class="usage-item">
+              <div class="usage-label">
+                <span>${label}</span>
+                <span>${pct}%</span>
+              </div>
+              <div class="bar"><div class="fill" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>
+              <div class="usage-note">${escapeHtml(`${mins} · ${reset}`)}</div>
+            </div>
+          `;
+        }).join("");
+        const notes = [];
+        if (codex.plan_type) notes.push(`${t("codexPlan")}: ${codex.plan_type}`);
+        if (typeof codex.credits_balance === "number") notes.push(`${t("codexCredits")}: ${codex.credits_balance}`);
+        return `${rows}${notes.length ? `<div class="usage-note">${escapeHtml(notes.join(" · "))}</div>` : ""}`;
+      }
+
       function statusClass(status) {
         if (status === "healthy") return "healthy";
         if (status === "dead") return "dead";
         return "warn";
       }
 
+      function statusLabel(status) {
+        const map = {
+          healthy: t("statusHealthy"),
+          cooldown_5h: t("statusCooldown5h"),
+          cooldown_7d: t("statusCooldown7d"),
+          cooldown_sonnet_7d: t("statusCooldownSonnet7d"),
+          codex_review_limit: t("statusCodexReviewLimit"),
+          codex_primary_limit: t("statusCodexPrimaryLimit"),
+          codex_secondary_limit: t("statusCodexSecondaryLimit"),
+          dead: t("statusDead")
+        };
+        return map[status] || status || "";
+      }
+
+      function hasClaudecodeUsage(usage) {
+        return Boolean(
+          usage &&
+          (usage.five_hour?.utilization_pct != null ||
+            usage.seven_day?.utilization_pct != null ||
+            usage.seven_day_sonnet?.utilization_pct != null)
+        );
+      }
+
+      function hasCodexUsage(usage) {
+        return Boolean(
+          usage &&
+          usage.codex &&
+          (
+            usage.codex.primary?.used_percent != null ||
+            usage.codex.secondary?.used_percent != null ||
+            usage.codex.plan_type ||
+            typeof usage.codex.credits_balance === "number"
+          )
+        );
+      }
+
+      function credentialJson(item) {
+        return (item.channel || currentChannel) === "codex"
+          ? {
+              channel: item.channel || currentChannel,
+              access_token: item.access_token,
+              refresh_token: item.refresh_token,
+              expires_at_unix_ms: item.expires_at_unix_ms,
+              user_email: item.user_email,
+              account_id: item.account_id,
+              subscription_type: item.subscription_type,
+              status: item.status
+            }
+          : {
+              channel: item.channel || currentChannel,
+              access_token: item.access_token,
+              refresh_token: item.refresh_token,
+              expires_at_unix_ms: item.expires_at_unix_ms,
+              user_email: item.user_email,
+              organization_uuid: item.organization_uuid,
+              subscription_type: item.subscription_type,
+              rate_limit_tier: item.rate_limit_tier,
+              status: item.status
+            };
+      }
+
       function credentialCard(item) {
+        const itemChannel = item.channel || currentChannel;
         const enabled = item.enabled ? t("enabled") : t("disabled");
         const toggleAction = item.enabled ? "disable" : "enable";
         const toggleLabel = item.enabled ? t("disable") : t("enable");
-        const jsonText = JSON.stringify(item.json || {}, null, 2);
-        const email = item.user_email || item.id;
+        const jsonText = JSON.stringify(item.json || credentialJson(item), null, 2);
+        const title = item.user_email || item.account_id || item.id;
+        const usageBlock = itemChannel === "codex"
+          ? (hasCodexUsage(item.usage) ? `<div class="usage-list">${codexUsageRows(item.usage)}</div>` : "")
+          : (hasClaudecodeUsage(item.usage) ? `<div class="usage-list">${usageRows(item.usage)}</div>` : "");
         return `
           <div class="credential">
             <div class="credential-head">
               <div>
-                <div class="credential-title">${escapeHtml(email)}</div>
+                <div class="credential-title">${escapeHtml(title)}</div>
                 <div class="meta">
-                  <span class="pill ${statusClass(item.status)}">${escapeHtml(item.status || "")}</span>
+                  <span class="pill ${statusClass(item.status)}">${escapeHtml(statusLabel(item.status))}</span>
                   <span class="pill">${t("orderPrefix")}: ${item.order ?? "-"}</span>
                   <span class="pill">${enabled}</span>
                 </div>
@@ -533,7 +678,7 @@
               </div>
             </div>
             ${item.last_error ? `<div class="usage-note">${t("lastError")}: ${escapeHtml(item.last_error)}</div>` : ""}
-            <div class="usage-list">${usageRows(item.usage || {})}</div>
+            ${usageBlock}
             <details>
               <summary>${t("credentialJson")}</summary>
               <pre>${escapeHtml(jsonText)}</pre>
@@ -542,32 +687,17 @@
         `;
       }
 
-      function escapeHtml(input) {
-        return String(input)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;");
-      }
-
       async function loadCredentials() {
-        const [credentials, usage] = await Promise.all([
-          api("/api/credentials"),
-          api("/api/credentials/usage")
-        ]);
-        const usageMap = new Map((usage || []).map((item) => [item.id, item]));
+        const credentials = await api(`${apiBase()}/credentials`);
+        let usageMap = new Map();
+        if (currentChannel === "claudecode" || currentChannel === "codex") {
+          const usage = await api(`${apiBase()}/credentials/usage`);
+          usageMap = new Map((usage || []).map((item) => [item.id, item]));
+        }
         const merged = (credentials || []).map((item) => ({
           ...item,
           ...(usageMap.get(item.id) || {}),
-          json: {
-            access_token: item.access_token,
-            refresh_token: item.refresh_token,
-            expires_at_unix_ms: item.expires_at_unix_ms,
-            user_email: item.user_email,
-            organization_uuid: item.organization_uuid,
-            subscription_type: item.subscription_type,
-            rate_limit_tier: item.rate_limit_tier,
-            status: item.status
-          }
+          json: credentialJson(item)
         }));
         els.credentialList.innerHTML = merged.length
           ? merged.map(credentialCard).join("")
@@ -575,17 +705,19 @@
       }
 
       async function loadPublic() {
-        const items = await api("/api/public/credentials", {
+        const items = await api("/api/claudecode/public/credentials", {
           headers: { "content-type": "application/json" }
         });
-        els.publicList.innerHTML = (items || []).map(credentialCard).join("");
+        els.publicList.innerHTML = (items || []).map((item) =>
+          credentialCard({ ...item, channel: "claudecode" })
+        ).join("");
         setStatus(els.publicStatus, t("publicReady"));
       }
 
       async function login() {
         localStorage.setItem(TOKEN_KEY, els.tokenInput.value.trim());
         try {
-          await api("/api/credentials");
+          await api(`${apiBase()}/credentials`);
           showAdmin();
           await refreshAll();
         } catch (error) {
@@ -618,6 +750,14 @@
         els.oauthPanel.classList.toggle("hidden", isCredentials);
       }
 
+      function setChannel(channel) {
+        currentChannel = channel;
+        localStorage.setItem(CHANNEL_KEY, channel);
+        els.channelClaudeTab.classList.toggle("active", channel === "claudecode");
+        els.channelCodexTab.classList.toggle("active", channel === "codex");
+        applyLanguage();
+      }
+
       async function refreshAll() {
         try {
           await loadCredentials();
@@ -639,9 +779,9 @@
         els.logoutBtn.textContent = t("logout");
         els.credentialsTab.textContent = t("credentials");
         els.oauthTab.textContent = t("oauth");
-        els.importTitle.textContent = t("importTitle");
+        els.importTitle.textContent = currentChannel === "codex" ? t("codexImportTitle") : t("claudecodeImportTitle");
         els.importBtn.textContent = t("importBtn");
-        els.oauthTitle.textContent = t("oauthTitle");
+        els.oauthTitle.textContent = currentChannel === "codex" ? t("codexOauthTitle") : t("claudecodeOauthTitle");
         els.oauthStartBtn.textContent = t("oauthOpen");
         els.oauthCallbackBtn.textContent = t("oauthFinish");
       }
@@ -665,11 +805,19 @@
       els.logoutBtn.addEventListener("click", logout);
       els.credentialsTab.addEventListener("click", () => setTab("credentials"));
       els.oauthTab.addEventListener("click", () => setTab("oauth"));
+      els.channelClaudeTab.addEventListener("click", async () => {
+        setChannel("claudecode");
+        if (localStorage.getItem(TOKEN_KEY)) await refreshAll();
+      });
+      els.channelCodexTab.addEventListener("click", async () => {
+        setChannel("codex");
+        if (localStorage.getItem(TOKEN_KEY)) await refreshAll();
+      });
 
       els.importBtn.addEventListener("click", async () => {
         try {
           const payload = JSON.parse(els.importInput.value || "{}");
-          await api("/api/credentials", {
+          await api(`${apiBase()}/credentials`, {
             method: "POST",
             body: JSON.stringify(payload)
           });
@@ -683,7 +831,7 @@
 
       els.oauthStartBtn.addEventListener("click", async () => {
         try {
-          const payload = await api("/api/oauth/start", {
+          const payload = await api(`${apiBase()}/oauth/start`, {
             method: "POST",
             body: "{}"
           });
@@ -696,7 +844,7 @@
 
       els.oauthCallbackBtn.addEventListener("click", async () => {
         try {
-          await api("/api/oauth/callback", {
+          await api(`${apiBase()}/oauth/callback`, {
             method: "POST",
             body: JSON.stringify({ callback_url: els.oauthCallbackInput.value })
           });
@@ -719,12 +867,12 @@
             return;
           }
           if (button.dataset.delete) {
-            await api(`/api/credentials/${button.dataset.delete}`, { method: "DELETE" });
+            await api(`${apiBase()}/credentials/${button.dataset.delete}`, { method: "DELETE" });
             await refreshAll();
             return;
           }
           if (button.dataset.toggle) {
-            await api(`/api/credentials/${button.dataset.toggle}/${button.dataset.action}`, {
+            await api(`${apiBase()}/credentials/${button.dataset.toggle}/${button.dataset.action}`, {
               method: "POST",
               body: "{}"
             });
@@ -744,6 +892,7 @@
       }
 
       async function boot() {
+        setChannel(currentChannel);
         applyLanguage();
         if (MODE === "usage") {
           els.usagePage.classList.remove("hidden");
@@ -754,7 +903,7 @@
         els.tokenInput.value = token;
         if (token) {
           try {
-            await api("/api/credentials");
+            await api(`${apiBase()}/credentials`);
             showAdmin();
             await refreshAll();
             return;

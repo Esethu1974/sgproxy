@@ -3,6 +3,7 @@ mod do_state;
 mod oauth;
 mod proxy;
 mod state;
+mod tokenizer;
 
 use worker::*;
 
@@ -17,7 +18,12 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         "/" => Response::from_html(render_index("admin")),
         "/usage" => Response::from_html(render_index("usage")),
         "/favicon.ico" => Response::empty().map(|resp| resp.with_status(204)),
-        path if path == "/v1" || path.starts_with("/v1/") || path.starts_with("/api/") => {
+        path if path == "/v1"
+            || path.starts_with("/v1/")
+            || path == "/codex"
+            || path.starts_with("/codex/")
+            || path.starts_with("/api/") =>
+        {
             let stub = singleton_stub(&env)?;
             stub.fetch_with_request(req).await
         }
