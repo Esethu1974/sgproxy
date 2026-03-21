@@ -341,10 +341,12 @@ impl SgproxyState {
     }
 
     async fn proxy(&self, req: Request, channel: ChannelKind) -> Result<Response> {
-        let mut doc = load_doc(&self.state.storage()).await?;
-        let selected = self.resolve_proxy_credential(channel, &mut doc).await?;
-        save_doc(&self.state.storage(), &doc).await?;
         let is_codex_review = channel == ChannelKind::Codex && request_subagent_is_review(&req);
+        let mut doc = load_doc(&self.state.storage()).await?;
+        let selected = self
+            .resolve_proxy_credential(channel, &mut doc, is_codex_review)
+            .await?;
+        save_doc(&self.state.storage(), &doc).await?;
 
         let result = proxy_request(req, &selected).await;
         let now = now_unix_ms();
@@ -353,7 +355,7 @@ impl SgproxyState {
         match result {
             Ok(outcome) => {
                 match outcome.status_code {
-                    200..=299 => record_success(&mut doc, &selected.id, now),
+                    200..=299 => record_success(&mut doc, &selected.id, now, is_codex_review),
                     401 | 403 => {
                         record_invalid_auth(
                             &mut doc,
@@ -461,10 +463,11 @@ impl SgproxyState {
         &self,
         channel: ChannelKind,
         doc: &mut DurableStateDoc,
+        is_codex_review: bool,
     ) -> Result<CredentialConfig> {
         loop {
             doc.normalize(now_unix_ms());
-            let selected = first_usable(&doc.credentials, channel, now_unix_ms())
+            let selected = first_usable(&doc.credentials, channel, now_unix_ms(), is_codex_review)
                 .ok_or_else(|| anyhow!("no usable credential configured"))?;
 
             match maybe_refresh_access_token(&selected).await {

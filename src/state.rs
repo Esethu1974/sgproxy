@@ -52,13 +52,22 @@ pub fn first_usable(
     credentials: &[CredentialConfig],
     channel: ChannelKind,
     now: u64,
+    is_codex_review: bool,
 ) -> Option<CredentialConfig> {
     credentials
         .iter()
         .filter(|item| item.channel == channel)
         .filter(|item| item.enabled)
         .filter(|item| !matches!(item.status, CredentialStatus::Dead))
-        .filter(|item| item.cooldown_until_unix_ms.is_none_or(|until| until <= now))
+        .filter(|item| {
+            if channel == ChannelKind::Codex
+                && item.status == CredentialStatus::CodexReviewLimit
+                && !is_codex_review
+            {
+                return true;
+            }
+            item.cooldown_until_unix_ms.is_none_or(|until| until <= now)
+        })
         .min_by_key(|item| item.order)
         .cloned()
 }
@@ -134,9 +143,15 @@ pub fn set_enabled(doc: &mut DurableStateDoc, id: &str, enabled: bool) -> Result
     Ok(item.clone())
 }
 
-pub fn record_success(doc: &mut DurableStateDoc, id: &str, now: u64) {
+pub fn record_success(doc: &mut DurableStateDoc, id: &str, now: u64, is_codex_review: bool) {
     if let Some(item) = doc.credentials.iter_mut().find(|item| item.id == id) {
         item.last_used_at_unix_ms = Some(now);
+        if item.channel == ChannelKind::Codex
+            && item.status == CredentialStatus::CodexReviewLimit
+            && !is_codex_review
+        {
+            return;
+        }
         item.last_error = None;
         if item.status != CredentialStatus::Dead {
             item.status = CredentialStatus::Healthy;
