@@ -579,6 +579,7 @@
           unauthorized: "未授权",
           noCredentials: "暂无凭证",
           lastError: "错误",
+          resetAt: "将重置于",
           orderPrefix: "顺序",
           statusHealthy: "健康",
           statusCooldown5h: "五小时冷却",
@@ -615,6 +616,7 @@
           unauthorized: "Unauthorized",
           noCredentials: "No credentials",
           lastError: "Error",
+          resetAt: "Resets at",
           orderPrefix: "Order",
           statusHealthy: "Healthy",
           statusCooldown5h: "5h Cooldown",
@@ -702,7 +704,7 @@
         return buckets.map(([key, label]) => {
           const item = usage[key] || {};
           const pct = Number(item.utilization_pct || 0);
-          const reset = item.resets_at || "-";
+          const reset = formatResetTime(item.resets_at);
           return `
             <div class="usage-item">
               <div class="usage-label">
@@ -771,6 +773,27 @@
           .replaceAll("&", "&amp;")
           .replaceAll("<", "&lt;")
           .replaceAll(">", "&gt;");
+      }
+
+      function formatLocalDateTime(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        const pad = (n) => String(n).padStart(2, "0");
+        return [
+          date.getFullYear(),
+          pad(date.getMonth() + 1),
+          pad(date.getDate())
+        ].join("-") + " " + [
+          pad(date.getHours()),
+          pad(date.getMinutes()),
+          pad(date.getSeconds())
+        ].join(":");
+      }
+
+      function formatResetTime(value) {
+        const formatted = formatLocalDateTime(value);
+        return formatted === "-" ? formatted : `${t("resetAt")} ${formatted}`;
       }
 
       /* ── Data loading ── */
