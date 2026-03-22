@@ -1,7 +1,1 @@
 *
-!.gitignore
-!index.js
-!index_bg.wasm
-!package.json
-!worker/
-!worker/shim.mjs

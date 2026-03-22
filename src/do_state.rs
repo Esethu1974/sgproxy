@@ -1,5 +1,8 @@
+use std::convert::TryFrom;
+
 use anyhow::{Result, anyhow};
 use serde_json::json;
+use web_sys::Request as WebRequest;
 use worker::{Env, Headers, Method, Request, Response, State, durable_object};
 
 use crate::config::{
@@ -7,9 +10,9 @@ use crate::config::{
     CredentialUsageSnapshot, DurableStateDoc,
 };
 use crate::oauth::{
-    OAuthCallbackInput, OAuthStartInput, RefreshError, exchange_claudecode_code_for_tokens,
-    fetch_claudecode_usage, fetch_oauth_profile, maybe_refresh_access_token,
-    oauth_start_claudecode, resolve_code_and_state,
+    OAuthCallbackInput, OAuthStartInput, RefreshError, RefreshedCredential,
+    exchange_claudecode_code_for_tokens, fetch_claudecode_usage, fetch_oauth_profile,
+    maybe_refresh_access_token, oauth_start_claudecode, resolve_code_and_state,
 };
 use crate::proxy::proxy_request;
 use crate::state::{
@@ -120,25 +123,30 @@ impl SgproxyState {
     }
 
     async fn public_credentials(&self) -> Result<Response> {
-        let doc = load_doc(&self.state.storage()).await?;
-        let response = self.build_usage_payload(doc.credentials).await;
+        let mut doc = load_doc(&self.state.storage()).await?;
+        let response = self.build_usage_payload(&mut doc, None).await;
+        save_doc(&self.state.storage(), &doc).await?;
         Ok(Response::from_json(&response)?)
     }
 
     async fn list_usage(&self) -> Result<Response> {
-        let doc = load_doc(&self.state.storage()).await?;
-        let response = self.build_usage_payload(doc.credentials).await;
+        let mut doc = load_doc(&self.state.storage()).await?;
+        let response = self.build_usage_payload(&mut doc, None).await;
+        save_doc(&self.state.storage(), &doc).await?;
         Ok(Response::from_json(&response)?)
     }
 
     async fn get_usage(&self, id: &str) -> Result<Response> {
-        let doc = load_doc(&self.state.storage()).await?;
-        let credential = doc
+        let mut doc = load_doc(&self.state.storage()).await?;
+        if !doc
             .credentials
-            .into_iter()
-            .find(|item| item.channel == ACTIVE_CHANNEL && item.id == id)
-            .ok_or_else(|| anyhow!("credential not found: {id}"))?;
-        let mut items = self.build_usage_payload(vec![credential]).await;
+            .iter()
+            .any(|item| item.channel == ACTIVE_CHANNEL && item.id == id)
+        {
+            return Err(anyhow!("credential not found: {id}"));
+        }
+        let mut items = self.build_usage_payload(&mut doc, Some(id)).await;
+        save_doc(&self.state.storage(), &doc).await?;
         let view = items
             .pop()
             .ok_or_else(|| anyhow!("credential not found: {id}"))?;
@@ -274,18 +282,41 @@ impl SgproxyState {
 
     async fn proxy(&self, req: Request) -> Result<Response> {
         let mut doc = load_doc(&self.state.storage()).await?;
-        let selected = self.resolve_proxy_credential(&mut doc).await?;
+        let mut selected = self.resolve_proxy_credential(&mut doc).await?;
         save_doc(&self.state.storage(), &doc).await?;
 
-        let result = proxy_request(req, &selected).await;
+        let retry_req = clone_request(&req)?;
+        let mut result = proxy_request(req, &selected).await;
         let now = now_unix_ms();
         let mut doc = load_doc(&self.state.storage()).await?;
+        let mut handled_auth_failure = false;
+
+        if matches!(
+            result,
+            Ok(ref outcome) if matches!(outcome.status_code, 401 | 403)
+        ) {
+            match self.refresh_credential(&mut doc, &selected, true).await {
+                Ok(Some(refreshed)) => {
+                    selected = refreshed;
+                    result = proxy_request(retry_req, &selected).await;
+                }
+                Ok(None) => {}
+                Err(RefreshError::InvalidCredential(message)) => {
+                    record_invalid_auth(&mut doc, &selected.id, now, message);
+                    handled_auth_failure = true;
+                }
+                Err(RefreshError::Transient(message)) => {
+                    record_transient(&mut doc, &selected.id, now, message);
+                    handled_auth_failure = true;
+                }
+            }
+        }
 
         match result {
             Ok(outcome) => {
                 match outcome.status_code {
                     200..=299 => record_success(&mut doc, &selected.id, now),
-                    401 | 403 => {
+                    401 | 403 if !handled_auth_failure => {
                         record_invalid_auth(
                             &mut doc,
                             &selected.id,
@@ -293,22 +324,30 @@ impl SgproxyState {
                             format!("upstream returned status {}", outcome.status_code),
                         );
                     }
-                    429 => match fetch_claudecode_usage(&selected.access_token).await {
-                        Ok(usage) => {
-                            record_rate_limited(&mut doc, &selected.id, now, Some(&usage), None);
-                        }
-                        Err(err) => {
+                    429 => {
+                        let (usage_credential, usage) =
+                            self.fetch_usage_snapshot(&mut doc, &selected).await;
+                        if usage.last_error.is_none() {
                             record_rate_limited(
                                 &mut doc,
-                                &selected.id,
+                                &usage_credential.id,
+                                now,
+                                Some(&usage),
+                                None,
+                            );
+                        } else {
+                            record_rate_limited(
+                                &mut doc,
+                                &usage_credential.id,
                                 now,
                                 None,
                                 Some(format!(
-                                    "upstream returned status 429; usage fetch failed: {err}"
+                                    "upstream returned status 429; usage fetch failed: {}",
+                                    usage.last_error.unwrap_or_default()
                                 )),
                             );
                         }
-                    },
+                    }
                     status => {
                         record_transient(
                             &mut doc,
@@ -338,33 +377,8 @@ impl SgproxyState {
             let selected = first_usable(&doc.credentials, ACTIVE_CHANNEL, now_unix_ms())
                 .ok_or_else(|| anyhow!("no usable credential configured"))?;
 
-            match maybe_refresh_access_token(&selected).await {
-                Ok(Some(refreshed)) => {
-                    let updated = upsert_credential(
-                        doc,
-                        CredentialUpsertInput {
-                            id: Some(selected.id.clone()),
-                            enabled: Some(selected.enabled),
-                            order: Some(selected.order),
-                            access_token: Some(refreshed.access_token),
-                            refresh_token: Some(refreshed.refresh_token),
-                            expires_at_unix_ms: Some(refreshed.expires_at_unix_ms),
-                            user_email: refreshed.user_email.or(selected.user_email.clone()),
-                            organization_uuid: refreshed
-                                .organization_uuid
-                                .or(selected.organization_uuid.clone()),
-                            subscription_type: refreshed
-                                .subscription_type
-                                .or_else(|| selected.subscription_type.clone()),
-                            rate_limit_tier: refreshed
-                                .rate_limit_tier
-                                .or_else(|| selected.rate_limit_tier.clone()),
-                        },
-                        Some(&selected.id),
-                        ACTIVE_CHANNEL,
-                    );
-                    return Ok(updated);
-                }
+            match self.refresh_credential(doc, &selected, false).await {
+                Ok(Some(updated)) => return Ok(updated),
                 Ok(None) => return Ok(selected),
                 Err(RefreshError::InvalidCredential(message)) => {
                     record_invalid_auth(doc, &selected.id, now_unix_ms(), message);
@@ -546,24 +560,154 @@ impl SgproxyState {
         })
     }
 
+    async fn refresh_credential(
+        &self,
+        doc: &mut DurableStateDoc,
+        credential: &CredentialConfig,
+        force: bool,
+    ) -> Result<Option<CredentialConfig>, RefreshError> {
+        let refresh_target = if force {
+            let mut forced = credential.clone();
+            forced.expires_at_unix_ms = 0;
+            forced
+        } else {
+            credential.clone()
+        };
+
+        match maybe_refresh_access_token(&refresh_target).await {
+            Ok(Some(refreshed)) => Ok(Some(apply_refreshed_credential(doc, credential, refreshed))),
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn fetch_usage_snapshot(
+        &self,
+        doc: &mut DurableStateDoc,
+        credential: &CredentialConfig,
+    ) -> (CredentialConfig, CredentialUsageSnapshot) {
+        let now = now_unix_ms();
+        let mut active = credential.clone();
+
+        match self.refresh_credential(doc, credential, false).await {
+            Ok(Some(updated)) => active = updated,
+            Ok(None) => {}
+            Err(RefreshError::InvalidCredential(message)) => {
+                record_invalid_auth(doc, &credential.id, now, message.clone());
+                return (
+                    current_credential(doc, &credential.id).unwrap_or_else(|| credential.clone()),
+                    CredentialUsageSnapshot {
+                        last_error: Some(message),
+                        ..CredentialUsageSnapshot::default()
+                    },
+                );
+            }
+            Err(RefreshError::Transient(message)) => {
+                return (
+                    current_credential(doc, &credential.id).unwrap_or_else(|| credential.clone()),
+                    CredentialUsageSnapshot {
+                        last_error: Some(message),
+                        ..CredentialUsageSnapshot::default()
+                    },
+                );
+            }
+        }
+
+        match fetch_claudecode_usage(&active.access_token).await {
+            Ok(usage) => (active, usage),
+            Err(err) => {
+                let message = err.to_string();
+                if !usage_auth_failed(&message) {
+                    return (
+                        active,
+                        CredentialUsageSnapshot {
+                            last_error: Some(message),
+                            ..CredentialUsageSnapshot::default()
+                        },
+                    );
+                }
+
+                match self.refresh_credential(doc, &active, true).await {
+                    Ok(Some(updated)) => {
+                        active = updated;
+                        match fetch_claudecode_usage(&active.access_token).await {
+                            Ok(usage) => (active, usage),
+                            Err(err) => {
+                                let retry_message = err.to_string();
+                                if usage_auth_failed(&retry_message) {
+                                    record_invalid_auth(
+                                        doc,
+                                        &active.id,
+                                        now_unix_ms(),
+                                        retry_message.clone(),
+                                    );
+                                }
+                                (
+                                    current_credential(doc, &active.id).unwrap_or(active),
+                                    CredentialUsageSnapshot {
+                                        last_error: Some(retry_message),
+                                        ..CredentialUsageSnapshot::default()
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    Ok(None) => (
+                        active,
+                        CredentialUsageSnapshot {
+                            last_error: Some(message),
+                            ..CredentialUsageSnapshot::default()
+                        },
+                    ),
+                    Err(RefreshError::InvalidCredential(refresh_message)) => {
+                        record_invalid_auth(
+                            doc,
+                            &active.id,
+                            now_unix_ms(),
+                            refresh_message.clone(),
+                        );
+                        (
+                            current_credential(doc, &active.id).unwrap_or(active),
+                            CredentialUsageSnapshot {
+                                last_error: Some(refresh_message),
+                                ..CredentialUsageSnapshot::default()
+                            },
+                        )
+                    }
+                    Err(RefreshError::Transient(refresh_message)) => (
+                        active,
+                        CredentialUsageSnapshot {
+                            last_error: Some(format!(
+                                "{message}; refresh failed: {refresh_message}"
+                            )),
+                            ..CredentialUsageSnapshot::default()
+                        },
+                    ),
+                }
+            }
+        }
+    }
+
     async fn build_usage_payload(
         &self,
-        credentials: Vec<CredentialConfig>,
+        doc: &mut DurableStateDoc,
+        only_id: Option<&str>,
     ) -> Vec<serde_json::Value> {
         let now = now_unix_ms();
         let mut items = Vec::new();
-        for credential in credentials
-            .into_iter()
+        let credential_ids = doc
+            .credentials
+            .iter()
             .filter(|item| item.channel == ACTIVE_CHANNEL)
-        {
-            let usage = match fetch_claudecode_usage(&credential.access_token).await {
-                Ok(usage) => usage,
-                Err(err) => CredentialUsageSnapshot {
-                    last_error: Some(err.to_string()),
-                    ..CredentialUsageSnapshot::default()
-                },
+            .filter(|item| only_id.is_none_or(|id| item.id == id))
+            .map(|item| item.id.clone())
+            .collect::<Vec<_>>();
+        for credential_id in credential_ids {
+            let Some(credential) = current_credential(doc, &credential_id) else {
+                continue;
             };
-            let view = build_usage_view(&credential, usage, now);
+            let (view_credential, usage) = self.fetch_usage_snapshot(doc, &credential).await;
+            let view = build_usage_view(&view_credential, usage, now);
             items.push(json!({
                 "id": view.id,
                 "user_email": view.user_email,
@@ -579,6 +723,49 @@ impl SgproxyState {
         }
         items
     }
+}
+
+fn apply_refreshed_credential(
+    doc: &mut DurableStateDoc,
+    credential: &CredentialConfig,
+    refreshed: RefreshedCredential,
+) -> CredentialConfig {
+    upsert_credential(
+        doc,
+        CredentialUpsertInput {
+            id: Some(credential.id.clone()),
+            enabled: Some(credential.enabled),
+            order: Some(credential.order),
+            access_token: Some(refreshed.access_token),
+            refresh_token: Some(refreshed.refresh_token),
+            expires_at_unix_ms: Some(refreshed.expires_at_unix_ms),
+            user_email: refreshed.user_email.or(credential.user_email.clone()),
+            organization_uuid: refreshed
+                .organization_uuid
+                .or(credential.organization_uuid.clone()),
+            subscription_type: refreshed
+                .subscription_type
+                .or_else(|| credential.subscription_type.clone()),
+            rate_limit_tier: refreshed
+                .rate_limit_tier
+                .or_else(|| credential.rate_limit_tier.clone()),
+        },
+        Some(&credential.id),
+        ACTIVE_CHANNEL,
+    )
+}
+
+fn current_credential(doc: &DurableStateDoc, id: &str) -> Option<CredentialConfig> {
+    doc.credentials.iter().find(|item| item.id == id).cloned()
+}
+
+fn clone_request(req: &Request) -> Result<Request> {
+    Ok(Request::from(WebRequest::try_from(req)?))
+}
+
+fn usage_auth_failed(message: &str) -> bool {
+    message.starts_with("oauth_usage_failed: status=401")
+        || message.starts_with("oauth_usage_failed: status=403")
 }
 
 fn ensure_channel_credential(doc: &DurableStateDoc, channel: ChannelKind, id: &str) -> Result<()> {
