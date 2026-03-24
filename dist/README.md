@@ -1,0 +1,1 @@
+This folder contains the built output assets for the worker "sgproxy" generated at 2026-03-24T10:00:20.713Z.

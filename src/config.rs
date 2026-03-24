@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub const STORAGE_KEY: &str = "state";
 pub const DEFAULT_REQUIRED_BETA: &str = "oauth-2025-04-20";
+pub const DEFAULT_CONTEXT_1M_BETA: &str = "context-1m-2025-08-07";
 pub const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_CLAUDE_AI_BASE_URL: &str = "https://claude.ai";
@@ -59,6 +60,10 @@ pub struct CredentialConfig {
     pub refresh_token: String,
     #[serde(default)]
     pub expires_at_unix_ms: u64,
+    #[serde(default = "default_enabled")]
+    pub enable_sonnet_1m: bool,
+    #[serde(default = "default_enabled")]
+    pub enable_opus_1m: bool,
     #[serde(default)]
     pub user_email: Option<String>,
     #[serde(default)]
@@ -149,6 +154,10 @@ pub struct CredentialUpsertInput {
     #[serde(default)]
     pub expires_at_unix_ms: Option<u64>,
     #[serde(default)]
+    pub enable_sonnet_1m: Option<bool>,
+    #[serde(default)]
+    pub enable_opus_1m: Option<bool>,
+    #[serde(default)]
     pub user_email: Option<String>,
     #[serde(default)]
     pub account_uuid: Option<String>,
@@ -165,6 +174,8 @@ pub struct CredentialJsonView {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at_unix_ms: u64,
+    pub enable_sonnet_1m: bool,
+    pub enable_opus_1m: bool,
     pub user_email: Option<String>,
     pub account_uuid: Option<String>,
     pub organization_uuid: Option<String>,
@@ -227,6 +238,8 @@ impl CredentialConfig {
             access_token: self.access_token.clone(),
             refresh_token: self.refresh_token.clone(),
             expires_at_unix_ms: self.expires_at_unix_ms,
+            enable_sonnet_1m: self.enable_sonnet_1m,
+            enable_opus_1m: self.enable_opus_1m,
             user_email: self.user_email.clone(),
             account_uuid: self.account_uuid.clone(),
             organization_uuid: self.organization_uuid.clone(),

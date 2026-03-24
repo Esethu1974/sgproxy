@@ -7,13 +7,27 @@ use worker::{Fetch, Headers, Request, RequestInit, Response};
 use crate::config::{
     CLAUDE_CODE_BILLING_CCH, CLAUDE_CODE_BILLING_ENTRYPOINT, CLAUDE_CODE_BILLING_HEADER_PREFIX,
     CLAUDE_CODE_BILLING_SALT, CredentialConfig, DEFAULT_ANTHROPIC_VERSION, DEFAULT_BASE_URL,
-    DEFAULT_REQUIRED_BETA, DEFAULT_USER_AGENT, MAGIC_TRIGGER_1H_ID, MAGIC_TRIGGER_5M_ID,
-    MAGIC_TRIGGER_AUTO_ID,
+    DEFAULT_CONTEXT_1M_BETA, DEFAULT_REQUIRED_BETA, DEFAULT_USER_AGENT, MAGIC_TRIGGER_1H_ID,
+    MAGIC_TRIGGER_5M_ID, MAGIC_TRIGGER_AUTO_ID,
 };
 
 pub struct ProxyOutcome {
     pub response: Response,
     pub status_code: u16,
+    pub disable_sonnet_1m: bool,
+    pub disable_opus_1m: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ClaudeCode1mTarget {
+    Sonnet,
+    Opus,
+}
+
+#[derive(Debug, Default)]
+struct PreparedProxyRequest {
+    body: Option<Vec<u8>>,
+    context_1m_target: Option<ClaudeCode1mTarget>,
 }
 
 pub async fn proxy_request(
@@ -21,20 +35,49 @@ pub async fn proxy_request(
     credential: &CredentialConfig,
 ) -> Result<ProxyOutcome> {
     let upstream_url = build_upstream_url(&req)?;
-    let headers = build_upstream_headers(req.headers(), credential.access_token.as_str())?;
-    let transformed_body = maybe_prepare_json_body(&mut req, credential).await?;
+    let method = req.method();
+    let prepared = maybe_prepare_request(&mut req, credential).await?;
+    let context_1m_enabled =
+        claudecode_1m_enabled_for_credential(credential, prepared.context_1m_target.as_ref());
 
-    let mut init = RequestInit::new();
-    init.with_method(req.method()).with_headers(headers);
-    if let Some(body) = transformed_body {
-        init.with_body(Some(body.into()));
-    } else if let Some(body) = req.inner().body() {
-        init.with_body(Some(body.into()));
+    let mut headers = build_upstream_headers(
+        req.headers(),
+        credential.access_token.as_str(),
+        context_1m_enabled,
+    )?;
+    let sent_with_context_1m = has_context_1m_beta(&headers);
+
+    let mut upstream_resp = send_upstream_request(
+        upstream_url.as_str(),
+        &method,
+        headers,
+        prepared.body.as_deref(),
+    )
+    .await?;
+    let mut status_code = upstream_resp.status_code();
+    let mut disable_sonnet_1m = false;
+    let mut disable_opus_1m = false;
+
+    if sent_with_context_1m && context_1m_enabled && status_code >= 400 {
+        headers = build_upstream_headers(req.headers(), credential.access_token.as_str(), false)?;
+        let retry_resp = send_upstream_request(
+            upstream_url.as_str(),
+            &method,
+            headers,
+            prepared.body.as_deref(),
+        )
+        .await?;
+        if retry_resp.status_code() < 400 {
+            match prepared.context_1m_target.as_ref() {
+                Some(ClaudeCode1mTarget::Sonnet) => disable_sonnet_1m = true,
+                Some(ClaudeCode1mTarget::Opus) => disable_opus_1m = true,
+                None => {}
+            }
+        }
+        upstream_resp = retry_resp;
+        status_code = upstream_resp.status_code();
     }
 
-    let upstream_req = Request::new_with_init(upstream_url.as_str(), &init)?;
-    let upstream_resp = Fetch::Request(upstream_req).send().await?;
-    let status_code = upstream_resp.status_code();
     let response_headers = filter_response_headers(upstream_resp.headers())?;
     let (_, body) = upstream_resp.into_parts();
     let response = Response::builder()
@@ -45,6 +88,8 @@ pub async fn proxy_request(
     Ok(ProxyOutcome {
         response,
         status_code,
+        disable_sonnet_1m,
+        disable_opus_1m,
     })
 }
 
@@ -56,7 +101,11 @@ fn build_upstream_url(req: &Request) -> Result<Url> {
     Ok(target)
 }
 
-fn build_upstream_headers(original: &Headers, access_token: &str) -> Result<Headers> {
+fn build_upstream_headers(
+    original: &Headers,
+    access_token: &str,
+    allow_context_1m: bool,
+) -> Result<Headers> {
     let headers = Headers::new();
     let mut seen_user_agent = false;
     let mut seen_anthropic_version = false;
@@ -73,7 +122,7 @@ fn build_upstream_headers(original: &Headers, access_token: &str) -> Result<Head
             continue;
         }
         if lower == "anthropic-beta" {
-            collect_beta_values(&value, &mut beta_values);
+            collect_beta_values(&value, &mut beta_values, allow_context_1m);
             continue;
         }
         if lower == "user-agent" {
@@ -85,7 +134,10 @@ fn build_upstream_headers(original: &Headers, access_token: &str) -> Result<Head
         headers.append(&name, &value)?;
     }
 
-    collect_beta_values(DEFAULT_REQUIRED_BETA, &mut beta_values);
+    collect_beta_values(DEFAULT_REQUIRED_BETA, &mut beta_values, allow_context_1m);
+    if allow_context_1m {
+        collect_beta_values(DEFAULT_CONTEXT_1M_BETA, &mut beta_values, allow_context_1m);
+    }
     headers.set("authorization", &format!("Bearer {access_token}"))?;
     if !seen_user_agent {
         headers.set("user-agent", DEFAULT_USER_AGENT)?;
@@ -99,6 +151,22 @@ fn build_upstream_headers(original: &Headers, access_token: &str) -> Result<Head
     Ok(headers)
 }
 
+async fn send_upstream_request(
+    upstream_url: &str,
+    method: &worker::Method,
+    headers: Headers,
+    body: Option<&[u8]>,
+) -> Result<Response> {
+    let mut init = RequestInit::new();
+    init.with_method(method.clone()).with_headers(headers);
+    if let Some(body) = body {
+        init.with_body(Some(body.to_vec().into()));
+    }
+
+    let upstream_req = Request::new_with_init(upstream_url, &init)?;
+    Ok(Fetch::Request(upstream_req).send().await?)
+}
+
 fn filter_response_headers(original: &Headers) -> Result<Headers> {
     let headers = Headers::new();
     for (name, value) in original.entries() {
@@ -110,16 +178,32 @@ fn filter_response_headers(original: &Headers) -> Result<Headers> {
     Ok(headers)
 }
 
-fn collect_beta_values(raw: &str, target: &mut Vec<String>) {
+fn collect_beta_values(raw: &str, target: &mut Vec<String>, allow_context_1m: bool) {
     for value in raw
         .split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
+        if !allow_context_1m && is_context_1m_beta(value) {
+            continue;
+        }
         if !target.iter().any(|item| item == value) {
             target.push(value.to_string());
         }
     }
+}
+
+fn is_context_1m_beta(value: &str) -> bool {
+    value.trim().to_ascii_lowercase().starts_with("context-1m")
+}
+
+fn has_context_1m_beta(headers: &Headers) -> bool {
+    headers
+        .get("anthropic-beta")
+        .ok()
+        .flatten()
+        .map(|value| value.split(',').any(is_context_1m_beta))
+        .unwrap_or(false)
 }
 
 fn is_hop_by_hop(name: &str) -> bool {
@@ -136,47 +220,97 @@ fn is_hop_by_hop(name: &str) -> bool {
     )
 }
 
-async fn maybe_prepare_json_body(
+async fn maybe_prepare_request(
     req: &mut Request,
     credential: &CredentialConfig,
-) -> Result<Option<Vec<u8>>> {
+) -> Result<PreparedProxyRequest> {
     if !request_body_should_be_rewritten(req) {
-        return Ok(None);
+        let body = if request_can_have_body(req) {
+            Some(req.bytes().await?)
+        } else {
+            None
+        };
+        return Ok(PreparedProxyRequest {
+            body,
+            context_1m_target: None,
+        });
     }
 
     let bytes = req.bytes().await?;
     if bytes.is_empty() {
-        return Ok(Some(bytes));
+        return Ok(PreparedProxyRequest {
+            body: Some(bytes),
+            context_1m_target: None,
+        });
     }
 
     let mut body = match serde_json::from_slice::<Value>(&bytes) {
         Ok(body) => body,
-        Err(_) => return Ok(Some(bytes)),
+        Err(_) => {
+            return Ok(PreparedProxyRequest {
+                body: Some(bytes),
+                context_1m_target: None,
+            });
+        }
     };
+    let context_1m_target = body
+        .get("model")
+        .and_then(Value::as_str)
+        .and_then(claude_1m_target_for_model);
 
     normalize_claudecode_sampling(&mut body);
     apply_magic_string_cache_control_triggers(&mut body);
     apply_claudecode_metadata_user_id(&mut body, credential);
     apply_claudecode_billing_header_system_block(&mut body, request_claudecode_version(req));
-    Ok(Some(serde_json::to_vec(&body)?))
+    Ok(PreparedProxyRequest {
+        body: Some(serde_json::to_vec(&body)?),
+        context_1m_target,
+    })
 }
 
 fn request_body_should_be_rewritten(req: &Request) -> bool {
-    matches!(
-        req.method(),
-        worker::Method::Post | worker::Method::Put | worker::Method::Patch
-    ) && req
-        .headers()
-        .get("content-type")
-        .ok()
-        .flatten()
-        .map(|value| value.to_ascii_lowercase().contains("application/json"))
-        .unwrap_or(false)
+    request_can_have_body(req)
+        && req
+            .headers()
+            .get("content-type")
+            .ok()
+            .flatten()
+            .map(|value| value.to_ascii_lowercase().contains("application/json"))
+            .unwrap_or(false)
         && req
             .url()
             .ok()
             .map(|url| url.path().starts_with("/v1/"))
             .unwrap_or(false)
+}
+
+fn request_can_have_body(req: &Request) -> bool {
+    matches!(
+        req.method(),
+        worker::Method::Post | worker::Method::Put | worker::Method::Patch | worker::Method::Delete
+    )
+}
+
+fn claude_1m_target_for_model(model: &str) -> Option<ClaudeCode1mTarget> {
+    let lower = model.trim().to_ascii_lowercase();
+    if lower.starts_with("claude-sonnet-4") {
+        return Some(ClaudeCode1mTarget::Sonnet);
+    }
+    if lower.starts_with("claude-opus-4-6") {
+        return Some(ClaudeCode1mTarget::Opus);
+    }
+    None
+}
+
+fn claudecode_1m_enabled_for_credential(
+    credential: &CredentialConfig,
+    target: Option<&ClaudeCode1mTarget>,
+) -> bool {
+    match target {
+        Some(ClaudeCode1mTarget::Sonnet) => credential.enable_sonnet_1m,
+        Some(ClaudeCode1mTarget::Opus) => credential.enable_opus_1m,
+        None => false,
+    }
 }
 
 fn request_claudecode_version(req: &Request) -> String {
@@ -676,6 +810,8 @@ mod tests {
             access_token: "token".to_string(),
             refresh_token: "refresh".to_string(),
             expires_at_unix_ms: 0,
+            enable_sonnet_1m: true,
+            enable_opus_1m: true,
             user_email: Some("user@example.com".to_string()),
             account_uuid: Some("acct_123".to_string()),
             organization_uuid: Some("org_123".to_string()),
@@ -840,5 +976,44 @@ mod tests {
         normalize_claudecode_sampling(&mut body);
 
         assert_eq!(body["top_p"], json!(0.9));
+    }
+
+    #[test]
+    fn detects_1m_target_from_model() {
+        assert_eq!(
+            claude_1m_target_for_model("claude-sonnet-4-5"),
+            Some(ClaudeCode1mTarget::Sonnet)
+        );
+        assert_eq!(
+            claude_1m_target_for_model("claude-opus-4-6-thinking"),
+            Some(ClaudeCode1mTarget::Opus)
+        );
+        assert_eq!(claude_1m_target_for_model("claude-3-7-sonnet"), None);
+    }
+
+    #[test]
+    fn collect_beta_values_adds_context_1m_when_enabled() {
+        let mut values = Vec::new();
+        collect_beta_values(DEFAULT_REQUIRED_BETA, &mut values, true);
+        collect_beta_values(DEFAULT_CONTEXT_1M_BETA, &mut values, true);
+
+        assert!(values.iter().any(|item| item == DEFAULT_REQUIRED_BETA));
+        assert!(values.iter().any(|item| item == DEFAULT_CONTEXT_1M_BETA));
+    }
+
+    #[test]
+    fn collect_beta_values_strip_context_1m_when_disabled() {
+        let mut values = Vec::new();
+        collect_beta_values(
+            "output-128k-2025-02-19, context-1m-2025-08-07, custom-beta",
+            &mut values,
+            false,
+        );
+        collect_beta_values(DEFAULT_REQUIRED_BETA, &mut values, false);
+
+        assert!(values.iter().any(|item| item == DEFAULT_REQUIRED_BETA));
+        assert!(values.iter().any(|item| item == "output-128k-2025-02-19"));
+        assert!(values.iter().any(|item| item == "custom-beta"));
+        assert!(!values.iter().any(|item| item == DEFAULT_CONTEXT_1M_BETA));
     }
 }

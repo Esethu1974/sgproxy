@@ -88,6 +88,18 @@ pub fn upsert_credential(
         access_token: input.access_token.unwrap_or_default(),
         refresh_token: input.refresh_token.unwrap_or_default(),
         expires_at_unix_ms: input.expires_at_unix_ms.unwrap_or(0),
+        enable_sonnet_1m: input.enable_sonnet_1m.unwrap_or(
+            current
+                .as_ref()
+                .map(|item| item.enable_sonnet_1m)
+                .unwrap_or(true),
+        ),
+        enable_opus_1m: input.enable_opus_1m.unwrap_or(
+            current
+                .as_ref()
+                .map(|item| item.enable_opus_1m)
+                .unwrap_or(true),
+        ),
         user_email: clean_opt_owned(input.user_email),
         account_uuid: clean_opt_owned(input.account_uuid),
         organization_uuid: clean_opt_owned(input.organization_uuid),
@@ -131,6 +143,22 @@ pub fn set_enabled(doc: &mut DurableStateDoc, id: &str, enabled: bool) -> Result
         .ok_or_else(|| anyhow!("credential not found: {id}"))?;
     item.enabled = enabled;
     Ok(item.clone())
+}
+
+pub fn apply_1m_probe_result(
+    doc: &mut DurableStateDoc,
+    id: &str,
+    disable_sonnet_1m: bool,
+    disable_opus_1m: bool,
+) -> Option<CredentialConfig> {
+    let item = doc.credentials.iter_mut().find(|item| item.id == id)?;
+    if disable_sonnet_1m {
+        item.enable_sonnet_1m = false;
+    }
+    if disable_opus_1m {
+        item.enable_opus_1m = false;
+    }
+    Some(item.clone())
 }
 
 pub fn record_success(doc: &mut DurableStateDoc, id: &str, now: u64) {

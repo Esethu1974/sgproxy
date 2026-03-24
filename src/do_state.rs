@@ -16,9 +16,9 @@ use crate::oauth::{
 };
 use crate::proxy::proxy_request;
 use crate::state::{
-    build_usage_view, delete_credential, first_usable, insert_oauth_state, load_doc, now_unix_ms,
-    record_invalid_auth, record_rate_limited, record_success, record_transient, save_doc,
-    set_enabled, take_oauth_state, upsert_credential,
+    apply_1m_probe_result, build_usage_view, delete_credential, first_usable, insert_oauth_state,
+    load_doc, now_unix_ms, record_invalid_auth, record_rate_limited, record_success,
+    record_transient, save_doc, set_enabled, take_oauth_state, upsert_credential,
 };
 
 const ACTIVE_CHANNEL: ChannelKind = ChannelKind::ClaudeCode;
@@ -254,6 +254,8 @@ impl SgproxyState {
                     now_unix_ms()
                         .saturating_add(token.expires_in.unwrap_or(3600).saturating_mul(1000)),
                 ),
+                enable_sonnet_1m: None,
+                enable_opus_1m: None,
                 user_email: profile.as_ref().and_then(|item| item.email.clone()),
                 account_uuid: profile.as_ref().and_then(|item| item.account_uuid.clone()),
                 organization_uuid: token.organization_uuid.clone().or_else(|| {
@@ -315,6 +317,12 @@ impl SgproxyState {
 
         match result {
             Ok(outcome) => {
+                apply_1m_probe_result(
+                    &mut doc,
+                    &selected.id,
+                    outcome.disable_sonnet_1m,
+                    outcome.disable_opus_1m,
+                );
                 match outcome.status_code {
                     200..=299 => record_success(&mut doc, &selected.id, now),
                     401 | 403 if !handled_auth_failure => {
@@ -434,6 +442,14 @@ impl SgproxyState {
         let mut expires_at_unix_ms = input
             .expires_at_unix_ms
             .or_else(|| existing.as_ref().map(|item| item.expires_at_unix_ms));
+        let enable_sonnet_1m = input
+            .enable_sonnet_1m
+            .or_else(|| existing.as_ref().map(|item| item.enable_sonnet_1m))
+            .unwrap_or(true);
+        let enable_opus_1m = input
+            .enable_opus_1m
+            .or_else(|| existing.as_ref().map(|item| item.enable_opus_1m))
+            .unwrap_or(true);
         let mut user_email = input
             .user_email
             .clone()
@@ -490,6 +506,8 @@ impl SgproxyState {
                 access_token: access_token.clone().unwrap_or_default(),
                 refresh_token: refresh,
                 expires_at_unix_ms: expires_at_unix_ms.unwrap_or(0),
+                enable_sonnet_1m,
+                enable_opus_1m,
                 user_email: user_email.clone(),
                 account_uuid: account_uuid.clone(),
                 organization_uuid: organization_uuid.clone(),
@@ -567,6 +585,8 @@ impl SgproxyState {
             access_token: Some(access_token),
             refresh_token,
             expires_at_unix_ms: Some(expires_at_unix_ms.unwrap_or(0)),
+            enable_sonnet_1m: Some(enable_sonnet_1m),
+            enable_opus_1m: Some(enable_opus_1m),
             user_email,
             account_uuid,
             organization_uuid,
@@ -754,6 +774,8 @@ fn apply_refreshed_credential(
             access_token: Some(refreshed.access_token),
             refresh_token: Some(refreshed.refresh_token),
             expires_at_unix_ms: Some(refreshed.expires_at_unix_ms),
+            enable_sonnet_1m: Some(credential.enable_sonnet_1m),
+            enable_opus_1m: Some(credential.enable_opus_1m),
             user_email: refreshed.user_email.or(credential.user_email.clone()),
             account_uuid: refreshed.account_uuid.or(credential.account_uuid.clone()),
             organization_uuid: refreshed
