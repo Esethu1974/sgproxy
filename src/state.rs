@@ -1,7 +1,12 @@
 use anyhow::{Result, anyhow};
-use js_sys::Date;
 use rand::Rng as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use worker::Storage;
+
+#[cfg(target_arch = "wasm32")]
+use js_sys::Date;
 
 use crate::config::{
     ChannelKind, CredentialConfig, CredentialStatus, CredentialUpsertInput,
@@ -23,8 +28,17 @@ pub async fn save_doc(storage: &Storage, doc: &DurableStateDoc) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_arch = "wasm32")]
 pub fn now_unix_ms() -> u64 {
     Date::now().max(0.0) as u64
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 pub fn generate_credential_id() -> String {
@@ -247,7 +261,7 @@ pub fn build_usage_view(
 
 pub fn insert_oauth_state(doc: &mut DurableStateDoc, state: StoredOAuthState) {
     doc.oauth_states
-        .retain(|item| !(item.channel == state.channel && item.state_id == state.state_id));
+        .retain(|item| item.channel != state.channel);
     doc.oauth_states.push(state);
 }
 
@@ -294,6 +308,55 @@ fn derive_rate_limited_status(
     ))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_oauth_state(state_id: &str, channel: ChannelKind) -> StoredOAuthState {
+        StoredOAuthState {
+            channel,
+            state_id: state_id.to_string(),
+            code_verifier: format!("verifier_{state_id}"),
+            redirect_uri: "https://platform.claude.com/oauth/code/callback".to_string(),
+            created_at_unix_ms: now_unix_ms(),
+        }
+    }
+
+    #[test]
+    fn insert_oauth_state_replaces_existing_state_for_same_channel() {
+        let mut doc = DurableStateDoc::default();
+        insert_oauth_state(
+            &mut doc,
+            sample_oauth_state("old_state", ChannelKind::ClaudeCode),
+        );
+        insert_oauth_state(
+            &mut doc,
+            sample_oauth_state("new_state", ChannelKind::ClaudeCode),
+        );
+
+        assert_eq!(doc.oauth_states.len(), 1);
+        assert_eq!(doc.oauth_states[0].state_id, "new_state");
+    }
+
+    #[test]
+    fn take_oauth_state_without_requested_state_uses_latest_single_state() {
+        let mut doc = DurableStateDoc::default();
+        insert_oauth_state(
+            &mut doc,
+            sample_oauth_state("old_state", ChannelKind::ClaudeCode),
+        );
+        insert_oauth_state(
+            &mut doc,
+            sample_oauth_state("new_state", ChannelKind::ClaudeCode),
+        );
+
+        let state = take_oauth_state(&mut doc, ChannelKind::ClaudeCode, None).unwrap();
+
+        assert_eq!(state.state_id, "new_state");
+        assert!(doc.oauth_states.is_empty());
+    }
+}
+
 fn exact_usage_status(
     usage: &CredentialUsageSnapshot,
     now: u64,
@@ -337,6 +400,10 @@ fn parse_unix_ms(raw: Option<&str>) -> Option<u64> {
     if raw.is_empty() {
         return None;
     }
-    let value = Date::parse(raw);
-    (value.is_finite() && value >= 0.0).then_some(value as u64)
+    if let Ok(value) = raw.parse::<u64>() {
+        return Some(value);
+    }
+    let value = OffsetDateTime::parse(raw, &Rfc3339).ok()?;
+    let unix_ms = value.unix_timestamp_nanos() / 1_000_000;
+    u64::try_from(unix_ms).ok()
 }
