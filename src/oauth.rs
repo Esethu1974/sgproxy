@@ -118,11 +118,11 @@ struct OAuthProfileOrg {
 #[derive(Debug, Deserialize)]
 struct UsagePayload {
     #[serde(default)]
-    five_hour: UsageBucketPayload,
+    five_hour: Option<UsageBucketPayload>,
     #[serde(default)]
-    seven_day: UsageBucketPayload,
+    seven_day: Option<UsageBucketPayload>,
     #[serde(default)]
-    seven_day_sonnet: UsageBucketPayload,
+    seven_day_sonnet: Option<UsageBucketPayload>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -286,12 +286,7 @@ pub async fn fetch_claudecode_usage(access_token: &str) -> Result<CredentialUsag
     }
 
     let payload = serde_json::from_slice::<UsagePayload>(&bytes)?;
-    Ok(CredentialUsageSnapshot {
-        five_hour: parse_usage_bucket(payload.five_hour),
-        seven_day: parse_usage_bucket(payload.seven_day),
-        seven_day_sonnet: parse_usage_bucket(payload.seven_day_sonnet),
-        last_error: None,
-    })
+    Ok(parse_usage_payload(payload))
 }
 
 async fn maybe_refresh_claudecode_access_token(
@@ -461,6 +456,15 @@ fn parse_usage_bucket(bucket: UsageBucketPayload) -> CredentialUsageBucket {
             .utilization
             .map(|value| value.round().clamp(0.0, 100.0) as u32),
         resets_at: bucket.resets_at.and_then(clean_string),
+    }
+}
+
+fn parse_usage_payload(payload: UsagePayload) -> CredentialUsageSnapshot {
+    CredentialUsageSnapshot {
+        five_hour: parse_usage_bucket(payload.five_hour.unwrap_or_default()),
+        seven_day: parse_usage_bucket(payload.seven_day.unwrap_or_default()),
+        seven_day_sonnet: parse_usage_bucket(payload.seven_day_sonnet.unwrap_or_default()),
+        last_error: None,
     }
 }
 
